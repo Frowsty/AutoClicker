@@ -1,2 +1,4 @@
 # AutoClicker
-Simple auto clicker for windows
+Auto clicker with support for delay between clicks
+
+!WINDOW ONLY!
