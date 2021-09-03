@@ -147,7 +147,7 @@ public:
     }
 };
 
-int main() 
+int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow)
 {
     AutoClicker* auto_clicker = new AutoClicker;
 
