@@ -20,12 +20,13 @@ public:
     bool use_right_click = false;
     bool keep_window_ontop = false;
     bool keep_window_ontop_old = false;
+    bool pressed_hotkey = false;
 
     int start_value = 1;
 
-    long long start_tick = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-    long long last_tick = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-    long long current_tick = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    uint64_t start_tick = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    uint64_t last_tick = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    uint64_t current_tick = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
 
     void auto_clicker()
     {
@@ -78,7 +79,7 @@ public:
         gui.add_label("status", "Inactive", { 5 + status_size.x, 240 });
         gui.find_element("status")->set_text_color(olc::RED);
 
-        gui.add_label("panic_key", "Stop Key: ESC", { 130, 240 });
+        gui.add_label("panic_key", "Hotkey: ESC", { 140, 240 });
 
         gui.add_int_slider("start_time", "Start Delay (s): ", { 100, 40 }, { 100, 10 }, { 1, 10 }, &start_value);
         gui.add_int_slider("pause_time", "Timeout (ms): ", { 100, 60 }, { 100, 10 }, { 10, 1000 }, & timeout_value);
@@ -111,6 +112,39 @@ public:
                     start_tick = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
             });
 
+        // about window
+        gui.create_window("about_window", "About", { 220 / 2 - 80, 250 / 2 - 30 }, { 160, 50 });
+        gui.find_window("about_window")->close_window(true);
+        gui.find_window("about_window")->set_top_border_thickness(10);
+
+        gui.set_active_window("about_window");
+        
+        gui.add_label("info", "Auto clicker with\nposibility to pick delay\nbetween clicks\nGreat for cookie clicker", { 1, 1 });
+
+        gui.clear_active_window();
+
+        // Credits window
+        gui.create_window("credits_window", "Credits", { 220 / 2 - 80, 250 / 2 - 30 }, { 160, 50 });
+        gui.find_window("credits_window")->close_window(true);
+        gui.find_window("credits_window")->set_top_border_thickness(10);
+
+        gui.set_active_window("credits_window");
+
+        gui.add_label("cred", "Made by: Frosty\nUsing: olcPGE/FrostUI\nVersion: 1.0", { 1, 1 });
+
+        gui.clear_active_window();
+
+        gui.add_button("about", "About", { 5, 215 }, { 100, 20 }, [&]
+            {
+                gui.find_window("about_window")->close_window(false);
+                gui.find_window("about_window")->set_focused(true);
+            });
+
+        gui.add_button("credits", "Credits", { 115, 215 }, { 100, 20 }, [&]
+            {
+                gui.find_window("credits_window")->close_window(false);
+                gui.find_window("credits_window")->set_focused(true);
+            });
         
         return true;
     }
@@ -120,16 +154,27 @@ public:
         Clear(olc::BLACK);
 
         // panic key
-        if (GetKeyState(VK_ESCAPE) < 0)
+        if (GetKeyState(VK_ESCAPE) < 0 && !pressed_hotkey)
         {
-            gui.find_element("status")->set_text_color(olc::RED);
-            gui.find_element("status")->set_text("Inactive");
-            gui.find_element("activate")->set_text("Start Clicker");
-            is_active = false;
+            if (is_active)
+            {
+                gui.find_element("status")->set_text_color(olc::RED);
+                gui.find_element("status")->set_text("Inactive");
+                gui.find_element("activate")->set_text("Start Clicker");
+                is_active = false;
+            }
+            else
+            {
+                gui.find_element("status")->set_text_color(olc::GREEN);
+                gui.find_element("status")->set_text("Active");
+                gui.find_element("activate")->set_text("Stop Clicker");
+                is_active = true;
+            }
+            pressed_hotkey = true;
         }
 
-        if (GetKey(olc::ESCAPE).bPressed)
-            return false;
+        if (!(GetKeyState(VK_ESCAPE) < 0) && pressed_hotkey)
+            pressed_hotkey = false;
 
         gui.run();
 

@@ -67,44 +67,46 @@ namespace olc
     struct FUI_Colors
     {
         // window colors
-        olc::Pixel window_border_color = olc::GREY;
-        olc::Pixel window_background_color = olc::WHITE;
+        olc::Pixel window_border_color = { 76, 86, 106 };
+        olc::Pixel window_background_color = { 34, 38, 46 };
+        olc::Pixel window_title_color = olc::WHITE;
         // window exit button colors
-        olc::Pixel exit_button_normal = olc::GREY;
-        olc::Pixel exit_button_hover = { 150, 150, 150 };
-        olc::Pixel exit_button_click = { 100, 100, 100 };
+        olc::Pixel exit_button_normal = { 76, 86, 106 };
+        olc::Pixel exit_button_hover = { 67, 76, 94 };
+        olc::Pixel exit_button_click = { 46, 52, 64 };
+        olc::Pixel exit_button_text = olc::WHITE;
         // button colors
-        olc::Pixel button_normal = olc::GREY;
-        olc::Pixel button_hover = { 150, 150, 150 };
-        olc::Pixel button_click = { 120, 120, 120 };
-        olc::Pixel button_active = { 100, 100, 100 };
+        olc::Pixel button_normal = { 76, 86, 106 };
+        olc::Pixel button_hover = { 67, 76, 94 };
+        olc::Pixel button_click = { 46, 52, 64 };
+        olc::Pixel button_active = { 59, 66, 82 };
         // checkbox colors
-        olc::Pixel checkbox_normal = olc::GREY;
-        olc::Pixel checkbox_hover = { 150, 150, 150 };
-        olc::Pixel checkbox_click = { 120, 120, 120 };
-        olc::Pixel checkbox_active = { 100, 100, 100 };
+        olc::Pixel checkbox_normal = { 76, 86, 106 };
+        olc::Pixel checkbox_hover = { 67, 76, 94 };
+        olc::Pixel checkbox_click = { 46, 52, 64 };
+        olc::Pixel checkbox_active = { 59, 66, 82 };
         // dropdown colors
-        olc::Pixel dropdown_normal = olc::GREY;
-        olc::Pixel dropdown_hover = { 150, 150, 150 };
-        olc::Pixel dropdown_active = { 100, 100, 100 };
-        // combolist colors
-        olc::Pixel combolist_normal = olc::GREY;
-        olc::Pixel combolist_hover = { 150, 150, 150 };
-        olc::Pixel combolist_active = { 100, 100, 100 };
-        // combolist colors
-        olc::Pixel groupbox_outline = olc::GREY;
-        olc::Pixel groupbox_background = { 225, 225, 225 };
+        olc::Pixel dropdown_normal = { 76, 86, 106 };
+        olc::Pixel dropdown_hover = { 67, 76, 94 };
+        olc::Pixel dropdown_active = { 59, 66, 82 };
+        // combolist colors          
+        olc::Pixel combolist_normal = { 76, 86, 106 };
+        olc::Pixel combolist_hover = { 67, 76, 94 };
+        olc::Pixel combolist_active = { 59, 66, 82 };
+        // groupbox colors
+        olc::Pixel groupbox_outline = { 59, 66, 82 };
+        olc::Pixel groupbox_background = { 34, 38, 46 };
         // slider colors
         olc::Pixel slider_outline = olc::BLACK;
-        olc::Pixel slider_normal = { 150, 150, 150 };
-        olc::Pixel slider_hover = { 100, 100, 100 };
+        olc::Pixel slider_normal = { 76, 86, 106 };
+        olc::Pixel slider_hover = { 67, 76, 94 };
         // inputfield colors
         olc::Pixel inputfield_outline = olc::BLACK;
-        olc::Pixel inputfield_background = { 150, 150, 150 };
+        olc::Pixel inputfield_background = { 76, 86, 106 };
         olc::Pixel inputfield_select_all_background = { 29, 43, 240, 150 };
         olc::Pixel inputfield_cursor = olc::BLACK;
         // scroll indicator
-        olc::Pixel scroll_indicator = { 50, 50, 50 };
+        olc::Pixel scroll_indicator = { 59, 66, 82 };
     };
 
     enum class FUI_Type
@@ -194,7 +196,13 @@ namespace olc
 
     class FUI_Element
     {
-    public:
+    public: 
+        enum class type
+        {
+            FLOAT = 0,
+            INT
+        };
+    protected:
         enum class DropdownState
         {
             NONE = 0,
@@ -219,13 +227,6 @@ namespace olc
 
         FUI_Colors color_scheme;
 
-
-        enum class type
-        {
-            FLOAT = 0,
-            INT
-        };
-
         type slider_type;
         float slider_value_float = 0.f;
         int slider_value_int = 0;
@@ -247,13 +248,28 @@ namespace olc
         float animation_speed = 150.0f;
         int max_display_items = 0;
 
-        olc::Pixel text_color = olc::BLACK;
+        olc::Pixel text_color = olc::WHITE;
 
         std::string identifier;
+    public:
 
         virtual void draw(olc::PixelGameEngine* pge) {}
 
         virtual void input(olc::PixelGameEngine* pge) {}
+
+        const std::string get_identifier();
+
+        const int get_elements_amount();
+
+        const bool get_focused_status();
+
+        void set_focused_status(bool status);
+
+        const FUI_Window* get_parent();
+
+        const FUI_Type get_ui_type();
+
+        const olc::vf2d get_size();
 
         void set_size(olc::vi2d s);
 
@@ -280,6 +296,8 @@ namespace olc
         std::vector<int> get_selected_items();
 
         const olc::vf2d get_position() const;
+
+        const olc::vf2d get_absolute_position();
 
         void set_default_item(const int& item);
 
@@ -483,7 +501,7 @@ namespace olc
         std::string text_out_of_view;
         std::string displayed_text;
 
-        long long last_cursor_tick = 0;
+        uint64_t last_cursor_tick = 0;
 
     public:
         FUI_Inputfield(const std::string& id, FUI_Window* parent, const std::string& text, olc::vi2d position, olc::vi2d size);
@@ -521,6 +539,7 @@ namespace olc
         void push_focused_to_back();
 
         void push_focused_element_to_back();
+
     public:
 
         void set_active_window(const std::string& window_id);
@@ -647,7 +666,7 @@ namespace olc
 
         // Draw the window title
         olc::vf2d title_position = olc::vf2d{ position.x + (size.x / 2) - (pge->GetTextSizeProp(title).x / 2), position.y + (top_border_thickness / 2) - (pge->GetTextSizeProp(title).y / 2) };
-        pge->DrawStringPropDecal(title_position, title, olc::BLACK);
+        pge->DrawStringPropDecal(title_position, title, color_scheme.window_title_color);
 
         // Draw the default window close button
         olc::vf2d temp_pos = { position.x + size.x - (size.x / 10), position.y };
@@ -665,7 +684,7 @@ namespace olc
             break;
         }
         olc::vf2d close_position = olc::vf2d{ temp_pos.x + (temp_size.x / 2) - (pge->GetTextSizeProp("X").x / 2), temp_pos.y + (top_border_thickness / 2) - (pge->GetTextSizeProp("X").y / 2) };
-        pge->DrawStringPropDecal(close_position, "X", olc::BLACK);
+        pge->DrawStringPropDecal(close_position, "X", color_scheme.exit_button_text);
 
         // Override top border with a darker color when window is inactive 
         if (!focused)
@@ -766,6 +785,45 @@ namespace olc
     #               FUI_ELEMENT START                  #
     ####################################################
     */
+    const std::string FUI_Element::get_identifier()
+    {
+        return identifier;
+    }
+
+    const int FUI_Element::get_elements_amount()
+    {
+        if (ui_type == FUI_Type::DROPDOWN || ui_type == FUI_Type::COMBOLIST)
+            return elements.size();
+        else
+            std::cout << "Trying to get element amount on incorrect UI_TYPE\n";
+        return -1;
+    }
+
+    const bool FUI_Element::get_focused_status()
+    {
+        return is_focused;
+    }
+
+    void FUI_Element::set_focused_status(bool status)
+    {
+        is_focused = status;
+    }
+
+    const FUI_Window* FUI_Element::get_parent()
+    {
+        return parent;
+    }
+
+    const FUI_Type FUI_Element::get_ui_type()
+    {
+        return ui_type;
+    }
+
+    const olc::vf2d FUI_Element::get_size()
+    {
+        return size;
+    }
+
     void FUI_Element::set_size(olc::vi2d s)
     {
         size = s;
@@ -923,6 +981,15 @@ namespace olc
         return position;
     }
 
+    const olc::vf2d FUI_Element::get_absolute_position()
+    {
+        if (parent)
+            adaptive_position = (parent->get_position() + olc::vf2d{ parent->get_border_thickness(), parent->get_top_border_thickness() });
+        else
+            adaptive_position = olc::vf2d{ 0, 0 };
+        return adaptive_position + position;
+    }
+
     void FUI_Element::set_slider_value(float value)
     {
         if (ui_type == FUI_Type::SLIDER)
@@ -1054,7 +1121,7 @@ namespace olc
     {
         // Adapt positioning depending on if there's a parent to the element or not
         if (parent)
-            adaptive_position = (parent->get_position() + olc::vf2d{ parent->get_border_thickness(), parent->get_top_border_thickness() });
+            adaptive_position = get_absolute_position();
         else
             adaptive_position = olc::vi2d{ 0, 0 };
 
@@ -1117,7 +1184,7 @@ namespace olc
 
         // Adapt positioning depending on if there's a parent to the element or not
         if (parent)
-            adaptive_position = (parent->get_position() + olc::vf2d{ parent->get_border_thickness(), parent->get_top_border_thickness() });
+            adaptive_position = get_absolute_position();
         else
             adaptive_position = olc::vi2d{ 0, 0 };
 
@@ -1292,7 +1359,7 @@ namespace olc
     {
         // Adapt positioning depending on if there's a parent to the element or not
         if (parent)
-            adaptive_position = (parent->get_position() + olc::vf2d{ parent->get_border_thickness(), parent->get_top_border_thickness() });
+            adaptive_position = get_absolute_position();
         else
             adaptive_position = olc::vi2d{ 0, 0 };
 
@@ -1414,7 +1481,7 @@ namespace olc
     {
         // Adapt positioning depending on if there's a parent to the element or not
         if (parent)
-            adaptive_position = (parent->get_position() + olc::vf2d{ parent->get_border_thickness(), parent->get_top_border_thickness() });
+            adaptive_position = get_absolute_position();
         else
             adaptive_position = olc::vi2d{ 0, 0 };
 
@@ -1717,7 +1784,7 @@ namespace olc
     {
         // Adapt positioning depending on if there's a parent to the element or not
         if (parent)
-            adaptive_position = (parent->get_position() + olc::vf2d{ parent->get_border_thickness(), parent->get_top_border_thickness() });
+            adaptive_position = get_absolute_position();
         else
             adaptive_position = olc::vi2d{ 0, 0 };
 
@@ -2047,7 +2114,7 @@ namespace olc
     {
         // Adapt positioning depending on if there's a parent to the element or not
         if (parent)
-            adaptive_position = (parent->get_position() + olc::vf2d{ parent->get_border_thickness(), parent->get_top_border_thickness() });
+            adaptive_position = get_absolute_position();
         else
             adaptive_position = olc::vi2d{ 0, 0 };
 
@@ -2196,7 +2263,7 @@ namespace olc
     {
         // Adapt positioning depending on if there's a parent to the element or not
         if (parent)
-            adaptive_position = (parent->get_position() + olc::vf2d{ parent->get_border_thickness(), parent->get_top_border_thickness() });
+            adaptive_position = get_absolute_position();
         else
             adaptive_position = olc::vi2d{ 0, 0 };
 
@@ -2519,7 +2586,7 @@ namespace olc
     {
         // Adapt positioning depending on if there's a parent to the element or not
         if (parent)
-            adaptive_position = (parent->get_position() + olc::vf2d{ parent->get_border_thickness(), parent->get_top_border_thickness() });
+            adaptive_position = get_absolute_position();
         else
             adaptive_position = olc::vi2d{ 0, 0 };
 
@@ -2651,15 +2718,15 @@ namespace olc
     {
         for (auto element : elements)
         {
-            if (windows[window_index]->get_id() != element->parent->get_id())
+            if (!element->get_parent() || windows[window_index]->get_id() != element->get_parent()->get_id())
                 continue;
-            if (element->ui_type == FUI_Type::DROPDOWN || element->ui_type == FUI_Type::COMBOLIST)
+            if (element->get_ui_type() == FUI_Type::DROPDOWN || element->get_ui_type() == FUI_Type::COMBOLIST)
             {
-                auto adaptive = element->adaptive_position;
-                auto size = element->size;
-                auto position = element->position;
-                auto amount = element->elements.size();
-                if (element->is_focused && (pge->GetMousePos().x >= adaptive.x + position.x &&
+                auto adaptive = element->get_absolute_position();
+                auto size = element->get_size();
+                auto position = element->get_position();
+                auto amount = element->get_elements_amount();
+                if (element->get_focused_status() && (pge->GetMousePos().x >= adaptive.x + position.x &&
                     pge->GetMousePos().x <= adaptive.x + position.x + size.x &&
                     pge->GetMousePos().y >= adaptive.y + position.y &&
                     pge->GetMousePos().y <= adaptive.y + position.y + (size.y * amount) + size.y))
@@ -2679,9 +2746,9 @@ namespace olc
             bool input_was_focused = false;
             for (auto& element : elements)
             {
-                if (element->is_focused && element->ui_type == FUI_Type::INPUTFIELD)
+                if (element->get_focused_status() && element->get_ui_type() == FUI_Type::INPUTFIELD)
                 {
-                    element->is_focused = false;
+                    element->set_focused_status(false);
                     input_was_focused = true;
                     break;
                 }
@@ -2689,9 +2756,9 @@ namespace olc
             }
             for (auto& element : elements)
             {
-                if (element->ui_type == FUI_Type::INPUTFIELD && j > i && input_was_focused)
+                if (element->get_ui_type() == FUI_Type::INPUTFIELD && j > i && input_was_focused)
                 {
-                    element->is_focused = true;
+                    element->set_focused_status(true);
                     break;
                 }
                 j++;
@@ -2723,7 +2790,7 @@ namespace olc
         int i = 0;
         for (auto& element : elements)
         {
-            if (element->is_focused)
+            if (element->get_focused_status())
             {
                 elements.push_back(element);
                 elements.erase(elements.begin() + i);
@@ -2839,7 +2906,7 @@ namespace olc
         int i = 0;
         for (auto& element : elements)
         {
-            if (element->identifier == id)
+            if (element->get_identifier() == id)
             {
                 elements.erase(elements.begin() + i);
                 break;
@@ -2852,7 +2919,7 @@ namespace olc
     {
         for (auto& element : elements)
         {
-            if (element->identifier == id)
+            if (element->get_identifier() == id)
                 return element;
         }
         return nullptr;
@@ -2862,7 +2929,7 @@ namespace olc
     {
         for (auto& element : groupboxes)
         {
-            if (element->identifier == id)
+            if (element->get_identifier() == id)
                 return element;
         }
         return nullptr;
@@ -3331,12 +3398,12 @@ namespace olc
                 continue;
             if (!g->get_group().empty())
                 if (!active_group.second.empty())
-                    if (!g->parent && active_group.first.size() < 1)
+                    if (!g->get_parent() && active_group.first.size() < 1)
                         if (g->get_group() != active_group.second || g->get_group().empty())
                             continue;
             if (!g->get_group().empty() && (active_group.first.empty() && active_group.second.empty()))
                 continue;
-            if (!g->parent)
+            if (!g->get_parent())
                 g->draw(pge);
         }
 
@@ -3346,31 +3413,36 @@ namespace olc
                 continue;
             if (!e->get_group().empty())
                 if (!active_group.second.empty())
-                    if (!e->parent && active_group.first.size() < 1)
+                    if (!e->get_parent() && active_group.first.size() < 1)
                         if (e->get_group() != active_group.second || e->get_group().empty())
                             continue;
             if (!e->get_group().empty() && (active_group.first.empty() && active_group.second.empty()))
                 continue;
             // reset top priority if not focused anymore
-            if (trigger_pushback.second && !e->is_focused && trigger_pushback.second->identifier == e->identifier)
+            if (trigger_pushback.second && !e->get_focused_status() && trigger_pushback.second->get_identifier() == e->get_identifier())
             {
                 trigger_pushback.first = false;
                 trigger_pushback.second = nullptr;
             }
-            if (e->is_focused && e->ui_type != FUI_Type::INPUTFIELD)
+            if (e->get_focused_status() && e->get_ui_type() != FUI_Type::INPUTFIELD)
             {
                 trigger_pushback.first = true;
                 trigger_pushback.second = e;
             }
-            if (!e->parent)
+            if (!e->get_parent())
             {
-                if (trigger_pushback.second)
+                if (!is_a_window_focused())
                 {
-                    if (trigger_pushback.second->identifier == e->identifier)
+                    if (trigger_pushback.second)
+                    {
+                        if (trigger_pushback.second->get_identifier() == e->get_identifier())
+                        {
+                            e->input(pge);
+                        }
+                    }
+                    else
                         e->input(pge);
                 }
-                else
-                    e->input(pge);
                 e->draw(pge);
             }
         }
@@ -3407,12 +3479,12 @@ namespace olc
                         continue;
                     if (!g->get_group().empty())
                         if (!active_group.second.empty())
-                            if (g->parent && g->parent->get_id() == active_group.first)
+                            if (g->get_parent() && g->get_parent()->get_id() == active_group.first)
                                 if (g->get_group() != active_group.second || g->get_group().empty())
                                     continue;
                     if (!g->get_group().empty() && (active_group.first.empty() && active_group.second.empty()))
                         continue;
-                    if (g->parent && g->parent->get_id() == window->get_id())
+                    if (g->get_parent() && g->get_parent()->get_id() == window->get_id())
                         g->draw(pge);
                 }
 
@@ -3423,39 +3495,39 @@ namespace olc
                         continue;
                     if (!e->get_group().empty())
                         if (!active_group.second.empty())
-                            if (e->parent && e->parent->get_id() == active_group.first)
+                            if (e->get_parent() && e->get_parent()->get_id() == active_group.first)
                                 if (e->get_group() != active_group.second || e->get_group().empty())
                                     continue;
                     if (!e->get_group().empty() && (active_group.first.empty() && active_group.second.empty()))
                         continue;
                     // reset top priority if not focused anymore
-                    if (trigger_pushback.second && !e->is_focused && trigger_pushback.second->identifier == e->identifier)
+                    if (trigger_pushback.second && !e->get_focused_status() && trigger_pushback.second->get_identifier() == e->get_identifier())
                     {
                         trigger_pushback.first = false;
                         trigger_pushback.second = nullptr;
                     }
-                    if (e->is_focused && e->ui_type != FUI_Type::INPUTFIELD)
+                    if (e->get_focused_status() && e->get_ui_type() != FUI_Type::INPUTFIELD)
                     {
                         trigger_pushback.first = true;
                         trigger_pushback.second = e;
                     }
-                    if (e->parent)
+                    if (e->get_parent())
                     {
-                        if (e->parent->get_id() == window->get_id())
+                        if (e->get_parent()->get_id() == window->get_id())
                         {
                             e->draw(pge);
                             if (window->is_focused())
                             {
                                 if (trigger_pushback.second)
                                 {
-                                    if (trigger_pushback.second->identifier == e->identifier)
+                                    if (trigger_pushback.second->get_identifier() == e->get_identifier())
                                         e->input(pge);
                                 }
                                 else
                                     e->input(pge);
                             }
                             else
-                                e->is_focused = false;
+                                e->set_focused_status(false);
                         }
                         else
                             continue;
@@ -3476,15 +3548,15 @@ namespace olc
                         continue;
                     if (!e->get_group().empty())
                         if (!active_group.second.empty())
-                            if (e->parent && e->parent->get_id() == active_group.first)
+                            if (e->get_parent() && e->get_parent()->get_id() == active_group.first)
                                 if (e->get_group() != active_group.second || e->get_group().empty())
                                     continue;
                     if (!e->get_group().empty() && (active_group.first.empty() && active_group.second.empty()))
                         continue;
 
-                    if (e->parent)
+                    if (e->get_parent())
                     {
-                        if (e->parent->get_id() == saved_focused_window)
+                        if (e->get_parent()->get_id() == saved_focused_window)
                             e->input(pge);
                     }
                 }
