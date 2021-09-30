@@ -56,6 +56,8 @@
 
 #include "olcPixelGameEngine.h"
 #include <deque>
+#include <iomanip>
+#include <ctime>
 
 /*
 ####################################################
@@ -107,6 +109,9 @@ namespace olc
         olc::Pixel inputfield_cursor = olc::BLACK;
         // scroll indicator
         olc::Pixel scroll_indicator = { 59, 66, 82 };
+        // console colors
+        olc::Pixel console_outline = olc::BLACK;
+        olc::Pixel console_background = { 150, 150, 150 };
     };
 
     enum class FUI_Type
@@ -118,7 +123,8 @@ namespace olc
         COMBOLIST,
         GROUPBOX,
         SLIDER,
-        INPUTFIELD
+        INPUTFIELD,
+        CONSOLE
     };
 
     class FUI_Window
@@ -196,7 +202,7 @@ namespace olc
 
     class FUI_Element
     {
-    public: 
+    public:
         enum class type
         {
             FLOAT = 0,
@@ -212,7 +218,7 @@ namespace olc
         FUI_Window* parent = nullptr;
         olc::vf2d size;
         olc::vf2d position;
-        olc::vf2d adaptive_position;
+        olc::vf2d absolute_position;
         std::string text;
         std::string group;
         olc::vf2d text_scale = { 1.0f, 1.0f };
@@ -234,8 +240,12 @@ namespace olc
         int* slider_value_holder_int = nullptr;
         olc::vf2d range;
 
+        std::function<void()> input_enter_callback;
+
         bool* toggle_button_state = nullptr;
 
+        bool clear_inputfield = false;
+        std::string set_input_text = "";
         std::string inputfield_text = "";
         bool mask_inputfield = false;
 
@@ -251,6 +261,10 @@ namespace olc
         olc::Pixel text_color = olc::WHITE;
 
         std::string identifier;
+
+        std::function<void(std::string& command, std::string* return_msg)> command_handler;
+        bool should_clear_console = false;
+        std::string command_entry;
     public:
 
         virtual void draw(olc::PixelGameEngine* pge) {}
@@ -273,7 +287,7 @@ namespace olc
 
         void set_size(olc::vi2d s);
 
-        void set_position(olc::vi2d p);
+        void set_position(olc::vf2d p);
 
         void set_text(const std::string& txt);
 
@@ -309,15 +323,28 @@ namespace olc
 
         void set_slider_value(int value);
 
-        const float get_slider_value() const;
+        template<typename T>
+        const T get_slider_value() const;
 
         const std::string get_inputfield_value() const;
 
+        void clear_inputfield_value();
+
+        void set_inputfield_value(std::string value);
+
         void mask_inputfield_value(bool state);
 
-        olc::vi2d get_text_size(olc::PixelGameEngine* pge);
+        olc::vf2d get_text_size(olc::PixelGameEngine* pge);
 
         void add_texture(olc::Decal* texture, std::vector<olc::vi2d> texture_positions, olc::vi2d size);
+
+        void set_on_enter_callback(std::function<void()> cb);
+
+        void add_command_handler(std::function<void(std::string&, std::string*)> handler);
+
+        void add_command_entry(std::string& entry);
+
+        void clear_console();
     };
 
     class FUI_Label : public FUI_Element
@@ -490,6 +517,7 @@ namespace olc
         std::string text_noshift = "abcdefghijklmnopqrstuvwxyz0123456789[];,.'/\\`=- ";
         std::string text_shift = "ABCDEFGHIJKLMNOPQRSTUVWXYZ)!@#$%^&*({}:<>\"?|~+_ ";
         bool select_all = false;
+        int selected_chars = 0;
 
         bool is_textkey_pressed(olc::PixelGameEngine* pge, const TextKey& key);
 
@@ -497,17 +525,65 @@ namespace olc
 
         std::string get_char_from_id(olc::PixelGameEngine* pge);
 
+        std::string get_clipboard_data();
+
+        void copy_to_clipboard(std::string data);
+
         std::string old_inputfield_text = inputfield_text;
         std::string text_out_of_view;
         std::string displayed_text;
 
         uint64_t last_cursor_tick = 0;
+        uint64_t hold_backspace_tick = 0;
+        uint64_t last_backspace_tick = 0;
+        bool initial_backspace = true;
 
     public:
         FUI_Inputfield(const std::string& id, FUI_Window* parent, const std::string& text, olc::vi2d position, olc::vi2d size);
         FUI_Inputfield(const std::string& id, FUI_Window* parent, const std::string& group, const std::string& text, olc::vi2d position, olc::vi2d size);
         FUI_Inputfield(const std::string& id, const std::string& group, const std::string& text, olc::vi2d position, olc::vi2d size);
         FUI_Inputfield(const std::string& id, const std::string& text, olc::vi2d position, olc::vi2d size);
+
+        void draw(olc::PixelGameEngine* pge) override;
+
+        void input(olc::PixelGameEngine* pge) override;
+    };
+
+    class FUI_Console : public FUI_Element
+    {
+    private:
+        FUI_Inputfield inputfield = FUI_Inputfield{ "console_input", "", { 0, 0 }, { 0, 0 } };
+
+        int input_thickness = 10;
+        std::string command;
+        std::string executed_command;
+        std::string last_executed_command;
+        std::vector<std::string> executed_commands;
+
+        bool run_once = true;
+        float scroll_threshold = 0.f;
+        bool can_scroll = false;
+        int scroll_index = 0;
+        int commands_shown = 1;
+
+        std::string get_time()
+        {
+            std::time_t tt = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+            struct std::tm ptm;
+#ifdef _MSC_VER
+            localtime_s(&ptm, &tt);
+#else
+            localtime_r(&tt, &ptm);
+#endif
+            std::stringstream ss;
+            ss << std::put_time(&ptm, "%R");
+            return ss.str();
+        }
+    public:
+        FUI_Console(const std::string& id, FUI_Window* parent, const std::string& title, olc::vi2d position, olc::vi2d size, int input_thickness);
+        FUI_Console(const std::string& id, FUI_Window* parent, const std::string& group, const std::string& title, olc::vi2d position, olc::vi2d size, int input_thickness);
+        FUI_Console(const std::string& id, const std::string& title, olc::vi2d position, olc::vi2d size, int input_thickness);
+        FUI_Console(const std::string& id, const std::string& group, const std::string& title, olc::vi2d position, olc::vi2d size, int input_thickness);
 
         void draw(olc::PixelGameEngine* pge) override;
 
@@ -524,7 +600,7 @@ namespace olc
         std::deque<std::shared_ptr<FUI_Element>> elements;
         std::deque<std::shared_ptr<FUI_Element>> groupboxes;
         std::pair<bool, std::shared_ptr<FUI_Element>> trigger_pushback = std::make_pair(false, nullptr);
-        
+
         std::string current_focused_window;
         std::string saved_focused_window;
 
@@ -539,6 +615,8 @@ namespace olc
         void push_focused_to_back();
 
         void push_focused_element_to_back();
+
+        bool is_cursor_in_window();
 
     public:
 
@@ -592,6 +670,10 @@ namespace olc
 
         void add_inputfield(const std::string& identifier, const std::string& text, olc::vi2d position, olc::vi2d size);
 
+        void add_console(const std::string& parent_id, const std::string& identifier, const std::string& text, olc::vi2d position, olc::vi2d size, int inputfield_thickness);
+
+        void add_console(const std::string& identifier, const std::string& text, olc::vi2d position, olc::vi2d size, int inputfield_thickness);
+
         FUI_Window* find_window(const std::string& identifier);
 
         std::shared_ptr<FUI_Element> find_element(const std::string& identifier);
@@ -599,6 +681,8 @@ namespace olc
         std::shared_ptr<FUI_Element> find_groupbox(const std::string& identifier);
 
         void remove_element(const std::string& identifier);
+
+        void remove_window(const std::string& identifier);
 
         int get_element_amount();
 
@@ -666,7 +750,7 @@ namespace olc
 
         // Draw the window title
         olc::vf2d title_position = olc::vf2d{ position.x + (size.x / 2) - (pge->GetTextSizeProp(title).x / 2), position.y + (top_border_thickness / 2) - (pge->GetTextSizeProp(title).y / 2) };
-        pge->DrawStringPropDecal(title_position, title, color_scheme.window_title_color);
+        pge->DrawStringPropDecal(title_position, title, olc::BLACK);
 
         // Draw the default window close button
         olc::vf2d temp_pos = { position.x + size.x - (size.x / 10), position.y };
@@ -684,7 +768,7 @@ namespace olc
             break;
         }
         olc::vf2d close_position = olc::vf2d{ temp_pos.x + (temp_size.x / 2) - (pge->GetTextSizeProp("X").x / 2), temp_pos.y + (top_border_thickness / 2) - (pge->GetTextSizeProp("X").y / 2) };
-        pge->DrawStringPropDecal(close_position, "X", color_scheme.exit_button_text);
+        pge->DrawStringPropDecal(close_position, "X", olc::BLACK);
 
         // Override top border with a darker color when window is inactive 
         if (!focused)
@@ -829,7 +913,7 @@ namespace olc
         size = s;
     }
 
-    void FUI_Element::set_position(olc::vi2d p)
+    void FUI_Element::set_position(olc::vf2d p)
     {
         position = p;
     }
@@ -873,7 +957,7 @@ namespace olc
     void FUI_Element::add_item(const std::string& item, olc::vf2d scale = { 1.0f, 1.0f })
     {
         if (ui_type == FUI_Type::DROPDOWN || ui_type == FUI_Type::COMBOLIST)
-            elements.push_back(std::make_pair(elements.size(), std::make_pair(DropdownState::NONE, std::make_pair(scale, item))));
+            elements.emplace_back(std::make_pair(elements.size(), std::make_pair(DropdownState::NONE, std::make_pair(scale, item))));
         else
             std::cout << "Trying to add_item to wrong UI_TYPE\n";
     }
@@ -939,7 +1023,7 @@ namespace olc
                         if (element.first == item && !found)
                         {
                             element.second.first = DropdownState::ACTIVE;
-                            selected_elements.push_back(std::make_pair(element.first, element.second.second));
+                            selected_elements.emplace_back(std::make_pair(element.first, element.second.second));
                         }
                     }
                 }
@@ -966,7 +1050,7 @@ namespace olc
         {
             return_selected_items.clear();
             for (auto& item : selected_elements)
-                return_selected_items.push_back(item.first);
+                return_selected_items.emplace_back(item.first);
 
             return return_selected_items;
         }
@@ -984,10 +1068,10 @@ namespace olc
     const olc::vf2d FUI_Element::get_absolute_position()
     {
         if (parent)
-            adaptive_position = (parent->get_position() + olc::vf2d{ parent->get_border_thickness(), parent->get_top_border_thickness() });
+            absolute_position = (parent->get_position() + olc::vf2d{ parent->get_border_thickness(), parent->get_top_border_thickness() });
         else
-            adaptive_position = olc::vf2d{ 0, 0 };
-        return adaptive_position + position;
+            absolute_position = olc::vf2d{ 0, 0 };
+        return absolute_position + position;
     }
 
     void FUI_Element::set_slider_value(float value)
@@ -1012,22 +1096,23 @@ namespace olc
             std::cout << "Trying to set_slider_value on wrong UI_TYPE\n";
     }
 
-    const float FUI_Element::get_slider_value() const
+    template <typename T>
+    const T FUI_Element::get_slider_value() const
     {
         if (ui_type == FUI_Type::SLIDER)
         {
             switch (slider_type)
             {
             case type::FLOAT:
-                return slider_value_float;
+                return T(slider_value_float);
             case type::INT:
-                return slider_value_int;
+                return T(slider_value_int);
             }
         }
         else
             std::cout << "Trying to get_slider_value on wrong UI_TYPE\n";
 
-        return 0.0f;
+        return T(0);
     }
 
     const std::string FUI_Element::get_inputfield_value() const
@@ -1040,14 +1125,30 @@ namespace olc
         return "";
     }
 
+    void FUI_Element::clear_inputfield_value()
+    {
+        if (ui_type == FUI_Type::INPUTFIELD)
+            clear_inputfield = true;
+        else
+            std::cout << "Trying to clear_inputfield_value on wrong UI_TYPE\n";
+    }
+
+    void FUI_Element::set_inputfield_value(std::string value)
+    {
+        if (ui_type == FUI_Type::INPUTFIELD)
+            set_input_text = value;
+        else
+            std::cout << "Trying to set_inputfield_value on wrong UI_TYPE\n";
+    }
+
     void FUI_Element::mask_inputfield_value(bool state)
     {
         mask_inputfield = state;
     }
 
-    olc::vi2d FUI_Element::get_text_size(olc::PixelGameEngine* pge)
+    olc::vf2d FUI_Element::get_text_size(olc::PixelGameEngine* pge)
     {
-        return pge->GetTextSizeProp(text) * text_scale;
+        return static_cast<olc::vf2d>(pge->GetTextSizeProp(text)) * text_scale;
     }
 
     void FUI_Element::add_texture(olc::Decal* txtr, std::vector<olc::vi2d> texture_pos, olc::vi2d s)
@@ -1061,7 +1162,7 @@ namespace olc
         has_textures = true;
 
         // warning messages
-        switch(ui_type)
+        switch (ui_type)
         {
         case FUI_Type::BUTTON:
             if (toggle_button_state)
@@ -1073,7 +1174,45 @@ namespace olc
                 if (texture_positions.size() < 3)
                     std::cout << "There's not enough sprites to cover all button states\n";
             break;
+        case FUI_Type::CHECKBOX:
+            if (texture_positions.size() < 4)
+                std::cout << "There's not enough sprites to cover all checkbox state\n";
+            break;
         }
+    }
+
+    void FUI_Element::set_on_enter_callback(std::function<void()> callback)
+    {
+        if (ui_type == FUI_Type::INPUTFIELD)
+        {
+            input_enter_callback = callback;
+        }
+        else
+            std::cout << "Trying to set_on_enter_action on wrong UI_TYPE\n";
+    }
+
+    void FUI_Element::add_command_handler(std::function<void(std::string&, std::string*)> handler)
+    {
+        if (ui_type == FUI_Type::CONSOLE)
+            command_handler = handler;
+        else
+            std::cout << "Trying to add_command_handler to wrong UI_TYPE\n";
+    }
+
+    void FUI_Element::add_command_entry(std::string& entry)
+    {
+        if (ui_type == FUI_Type::CONSOLE)
+            command_entry = entry;
+        else
+            std::cout << "Trying to add_command_entry to wrong UI_TYPE\n";
+    }
+
+    void FUI_Element::clear_console()
+    {
+        if (ui_type == FUI_Type::CONSOLE)
+            should_clear_console = true;
+        else
+            std::cout << "Trying to clear_console on wrong UI_TYPE\n";
     }
 
     /*
@@ -1120,12 +1259,7 @@ namespace olc
     void FUI_Label::draw(olc::PixelGameEngine* pge)
     {
         // Adapt positioning depending on if there's a parent to the element or not
-        if (parent)
-            adaptive_position = get_absolute_position();
-        else
-            adaptive_position = olc::vi2d{ 0, 0 };
-
-        auto absolute_position = adaptive_position + position;
+        absolute_position = get_absolute_position();
 
         pge->DrawStringPropDecal(absolute_position, text, text_color, text_scale);
     }
@@ -1181,14 +1315,7 @@ namespace olc
 
     void FUI_Button::draw(olc::PixelGameEngine* pge)
     {
-
-        // Adapt positioning depending on if there's a parent to the element or not
-        if (parent)
-            adaptive_position = get_absolute_position();
-        else
-            adaptive_position = olc::vi2d{ 0, 0 };
-
-        auto absolute_position = adaptive_position + position;
+        absolute_position = get_absolute_position();
 
         if (has_textures)
         {
@@ -1216,12 +1343,11 @@ namespace olc
                 else
                     pge->DrawPartialDecal(absolute_position, texture, texture_positions[static_cast<int>(State::NONE)], texture_size, texture_scale);
                 break;
-                break;
             }
         }
         else
         {
-            auto text_size = pge->GetTextSizeProp(text) * text_scale;
+            auto text_size = static_cast<olc::vf2d>(pge->GetTextSizeProp(text))* text_scale;
 
             // Draw the body of the button
             switch (state)
@@ -1250,16 +1376,19 @@ namespace olc
     {
         if (!toggle_button_state)
         {
-            if (pge->GetMousePos().x >= adaptive_position.x + position.x &&
-                pge->GetMousePos().x <= adaptive_position.x + position.x + size.x &&
-                pge->GetMousePos().y >= adaptive_position.y + position.y &&
-                pge->GetMousePos().y <= adaptive_position.y + position.y + size.y)
+            if (pge->GetMousePos().x >= absolute_position.x &&
+                pge->GetMousePos().x <= absolute_position.x + size.x &&
+                pge->GetMousePos().y >= absolute_position.y &&
+                pge->GetMousePos().y <= absolute_position.y + size.y)
             {
                 if (pge->GetMouse(0).bPressed)
                     state = State::CLICK;
                 else if (pge->GetMouse(0).bReleased && state == State::CLICK)
+                {
                     callback();
-                
+                    state = State::HOVER;
+                }
+
                 if (state != State::CLICK)
                     state = State::HOVER;
             }
@@ -1268,10 +1397,10 @@ namespace olc
         }
         else
         {
-            if (pge->GetMousePos().x >= adaptive_position.x + position.x &&
-                pge->GetMousePos().x <= adaptive_position.x + position.x + size.x &&
-                pge->GetMousePos().y >= adaptive_position.y + position.y &&
-                pge->GetMousePos().y <= adaptive_position.y + position.y + size.y)
+            if (pge->GetMousePos().x >= absolute_position.x &&
+                pge->GetMousePos().x <= absolute_position.x + size.x &&
+                pge->GetMousePos().y >= absolute_position.y &&
+                pge->GetMousePos().y <= absolute_position.y + size.y)
             {
                 if (pge->GetMouse(0).bPressed)
                 {
@@ -1357,48 +1486,74 @@ namespace olc
 
     void FUI_Checkbox::draw(olc::PixelGameEngine* pge)
     {
-        // Adapt positioning depending on if there's a parent to the element or not
-        if (parent)
-            adaptive_position = get_absolute_position();
-        else
-            adaptive_position = olc::vi2d{ 0, 0 };
-
-        auto absolute_position = adaptive_position + position;
+        absolute_position = get_absolute_position();
 
         // Draw the text
-        auto text_size = pge->GetTextSizeProp(text) * text_scale;
+        auto text_size = static_cast<olc::vf2d>(pge->GetTextSizeProp(text))* text_scale;
         auto text_position = olc::vf2d{ absolute_position.x - text_size.x, absolute_position.y + (size.y / 2) - (text_size.y / 2) };
-        pge->FillRectDecal(absolute_position, size, color_scheme.checkbox_normal);
 
-        pge->DrawStringPropDecal(text_position, text, text_color, text_scale);
-
+        if (!has_textures)
+        {
+            pge->FillRectDecal(absolute_position, size, color_scheme.checkbox_normal);
+            pge->DrawStringPropDecal(text_position, text, text_color, text_scale);
+        }
         olc::vf2d checkbox_filling = olc::vf2d{ 1.0f, 1.0f };
         // Draw the body of the checkbox
-        switch (state)
+        if (has_textures)
         {
-        case State::NONE:
-            break;
-        case State::HOVER:
-            pge->FillRectDecal(absolute_position + checkbox_filling,
-                { static_cast<float>(size.x) - 2.0f, static_cast<float>(size.y) - 2.0f }, color_scheme.checkbox_hover);
-            break;
-        case State::CLICK:
-            pge->FillRectDecal(absolute_position + checkbox_filling,
-                { static_cast<float>(size.x) - 2.0f, static_cast<float>(size.y) - 2.0f }, color_scheme.checkbox_click);
-            break;
-        case State::ACTIVE:
-            pge->FillRectDecal(absolute_position + checkbox_filling,
-                { static_cast<float>(size.x) - 2.0f, static_cast<float>(size.y) - 2.0f }, color_scheme.checkbox_active);
-            break;
+            switch (state)
+            {
+            case State::NONE:
+                pge->DrawPartialDecal(absolute_position, texture, texture_positions[static_cast<int>(State::NONE)], texture_size, texture_scale);
+                break;
+            case State::HOVER:
+                if (texture_positions.size() > 1)
+                    pge->DrawPartialDecal(absolute_position, texture, texture_positions[static_cast<int>(State::HOVER)], texture_size, texture_scale);
+                else
+                    pge->DrawPartialDecal(absolute_position, texture, texture_positions[static_cast<int>(State::NONE)], texture_size, texture_scale);
+                break;
+            case State::CLICK:
+                if (texture_positions.size() > 2)
+                    pge->DrawPartialDecal(absolute_position, texture, texture_positions[static_cast<int>(State::CLICK)], texture_size, texture_scale);
+                else
+                    pge->DrawPartialDecal(absolute_position, texture, texture_positions[static_cast<int>(State::NONE)], texture_size, texture_scale);
+                break;
+            case State::ACTIVE:
+                if (texture_positions.size() > 3)
+                    pge->DrawPartialDecal(absolute_position, texture, texture_positions[static_cast<int>(State::CLICK)], texture_size, texture_scale);
+                else
+                    pge->DrawPartialDecal(absolute_position, texture, texture_positions[static_cast<int>(State::NONE)], texture_size, texture_scale);
+                break;
+            }
+        }
+        else
+        {
+            switch (state)
+            {
+            case State::NONE:
+                break;
+            case State::HOVER:
+                pge->FillRectDecal(absolute_position + checkbox_filling,
+                    { static_cast<float>(size.x) - 2.0f, static_cast<float>(size.y) - 2.0f }, color_scheme.checkbox_hover);
+                break;
+            case State::CLICK:
+                pge->FillRectDecal(absolute_position + checkbox_filling,
+                    { static_cast<float>(size.x) - 2.0f, static_cast<float>(size.y) - 2.0f }, color_scheme.checkbox_click);
+                break;
+            case State::ACTIVE:
+                pge->FillRectDecal(absolute_position + checkbox_filling,
+                    { static_cast<float>(size.x) - 2.0f, static_cast<float>(size.y) - 2.0f }, color_scheme.checkbox_active);
+                break;
+            }
         }
     }
 
     void FUI_Checkbox::input(olc::PixelGameEngine* pge)
     {
-        if (pge->GetMousePos().x >= adaptive_position.x + position.x &&
-            pge->GetMousePos().x <= adaptive_position.x + position.x + size.x &&
-            pge->GetMousePos().y >= adaptive_position.y + position.y &&
-            pge->GetMousePos().y <= adaptive_position.y + position.y + size.y)
+        if (pge->GetMousePos().x >= absolute_position.x &&
+            pge->GetMousePos().x <= absolute_position.x + size.x &&
+            pge->GetMousePos().y >= absolute_position.y &&
+            pge->GetMousePos().y <= absolute_position.y + size.y)
         {
             if (pge->GetMouse(0).bPressed)
             {
@@ -1479,14 +1634,8 @@ namespace olc
 
     void FUI_Dropdown::draw(olc::PixelGameEngine* pge)
     {
-        // Adapt positioning depending on if there's a parent to the element or not
-        if (parent)
-            adaptive_position = get_absolute_position();
-        else
-            adaptive_position = olc::vi2d{ 0, 0 };
-
-        auto absolute_position = adaptive_position + position;
-        auto title_text_size = pge->GetTextSizeProp(text) * text_scale;
+        absolute_position = get_absolute_position();
+        auto title_text_size = static_cast<olc::vf2d>(pge->GetTextSizeProp(text))* text_scale;
 
         if (is_open)
         {
@@ -1526,7 +1675,7 @@ namespace olc
 
         if (!selected_element.second.second.empty())
         {
-            auto element_text_size = pge->GetTextSizeProp(selected_element.second.second) * selected_element.second.first;
+            auto element_text_size = static_cast<olc::vf2d>(pge->GetTextSizeProp(selected_element.second.second))* selected_element.second.first;
             text_position = olc::vf2d{ absolute_position.x + (size.x / 2) - (element_text_size.x / 2),
                 absolute_position.y + (size.y / 2) - (element_text_size.y / 2) };
             pge->DrawStringPropDecal(text_position, selected_element.second.second, text_color, selected_element.second.first);
@@ -1537,7 +1686,7 @@ namespace olc
             int i = 1;
             for (int j = item_start_index - 1; j < item_start_index + max_display_items - 1; j++)
             {
-                auto element_text_size = pge->GetTextSizeProp(elements[j].second.second.second) * elements[j].second.second.first;
+                auto element_text_size = static_cast<olc::vf2d>(pge->GetTextSizeProp(elements[j].second.second.second))* elements[j].second.second.first;
                 if (active_size.y >= size.y * i)
                 {
                     switch (elements[j].second.first)
@@ -1563,7 +1712,7 @@ namespace olc
 
             if (is_open && (max_display_items < elements.size()))
             {
-                float scroll_size =  (size.y + active_size.y) / (elements.size() - max_display_items);
+                float scroll_size = (size.y + active_size.y) / (elements.size() - max_display_items);
                 float scroll_y_pos = ((item_start_index - 1) * scroll_size);
                 scroll_y_pos = scroll_y_pos - (scroll_y_pos / (elements.size() - max_display_items));
 
@@ -1577,7 +1726,7 @@ namespace olc
             int i = 1;
             for (auto& element : elements)
             {
-                auto element_text_size = pge->GetTextSizeProp(element.second.second.second) * element.second.second.first;
+                auto element_text_size = static_cast<olc::vf2d>(pge->GetTextSizeProp(element.second.second.second))* element.second.second.first;
                 if (active_size.y >= size.y * i)
                 {
                     switch (element.second.first)
@@ -1606,10 +1755,10 @@ namespace olc
     void FUI_Dropdown::input(olc::PixelGameEngine* pge)
     {
         bool could_close = false;
-        if (pge->GetMousePos().x >= adaptive_position.x + position.x &&
-            pge->GetMousePos().x <= adaptive_position.x + position.x + size.x &&
-            pge->GetMousePos().y >= adaptive_position.y + position.y &&
-            pge->GetMousePos().y <= adaptive_position.y + position.y + size.y)
+        if (pge->GetMousePos().x >= absolute_position.x &&
+            pge->GetMousePos().x <= absolute_position.x + size.x &&
+            pge->GetMousePos().y >= absolute_position.y &&
+            pge->GetMousePos().y <= absolute_position.y + size.y)
         {
             if (pge->GetMouse(1).bPressed)
                 selected_element.second.second.clear();
@@ -1633,10 +1782,10 @@ namespace olc
                 element_amount = max_display_items;
             else
                 element_amount = elements.size();
-            if (!(pge->GetMousePos().x >= adaptive_position.x + position.x &&
-                pge->GetMousePos().x <= adaptive_position.x + position.x + size.x &&
-                pge->GetMousePos().y >= adaptive_position.y + position.y &&
-                pge->GetMousePos().y <= adaptive_position.y + position.y + size.y + (size.y * element_amount)))
+            if (!(pge->GetMousePos().x >= absolute_position.x &&
+                pge->GetMousePos().x <= absolute_position.x + size.x &&
+                pge->GetMousePos().y >= absolute_position.y &&
+                pge->GetMousePos().y <= absolute_position.y + size.y + (size.y * element_amount)))
             {
                 if (pge->GetMouse(0).bPressed)
                     could_close = true;
@@ -1651,10 +1800,10 @@ namespace olc
                 int i = 1;
                 for (int j = item_start_index - 1; j < item_start_index + max_display_items - 1; j++)
                 {
-                    if (pge->GetMousePos().x >= adaptive_position.x + position.x &&
-                        pge->GetMousePos().x <= adaptive_position.x + position.x + size.x &&
-                        pge->GetMousePos().y > adaptive_position.y + position.y + (size.y * i) &&
-                        pge->GetMousePos().y < adaptive_position.y + position.y + (size.y * i) + size.y)
+                    if (pge->GetMousePos().x >= absolute_position.x &&
+                        pge->GetMousePos().x <= absolute_position.x + size.x &&
+                        pge->GetMousePos().y > absolute_position.y + (size.y * i) &&
+                        pge->GetMousePos().y < absolute_position.y + (size.y * i) + size.y)
                     {
                         if (pge->GetMouse(0).bPressed)
                             elements[j].second.first = DropdownState::ACTIVE;
@@ -1676,10 +1825,10 @@ namespace olc
                     }
                     i++;
                 }
-                if (pge->GetMousePos().x >= adaptive_position.x + position.x &&
-                    pge->GetMousePos().x <= adaptive_position.x + position.x + size.x &&
-                    pge->GetMousePos().y >= adaptive_position.y + position.y &&
-                    pge->GetMousePos().y <= adaptive_position.y + position.y + size.y + active_size.y)
+                if (pge->GetMousePos().x >= absolute_position.x &&
+                    pge->GetMousePos().x <= absolute_position.x + size.x &&
+                    pge->GetMousePos().y >= absolute_position.y &&
+                    pge->GetMousePos().y <= absolute_position.y + size.y + active_size.y)
                 {
                     if (elements.size() > max_display_items)
                     {
@@ -1701,10 +1850,10 @@ namespace olc
                 int i = 1;
                 for (auto& element : elements)
                 {
-                    if (pge->GetMousePos().x >= adaptive_position.x + position.x &&
-                        pge->GetMousePos().x <= adaptive_position.x + position.x + size.x &&
-                        pge->GetMousePos().y > adaptive_position.y + position.y + (size.y * i) &&
-                        pge->GetMousePos().y < adaptive_position.y + position.y + (size.y * i) + size.y)
+                    if (pge->GetMousePos().x >= absolute_position.x &&
+                        pge->GetMousePos().x <= absolute_position.x + size.x &&
+                        pge->GetMousePos().y > absolute_position.y + (size.y * i) &&
+                        pge->GetMousePos().y < absolute_position.y + (size.y * i) + size.y)
                     {
                         if (pge->GetMouse(0).bPressed)
                             element.second.first = DropdownState::ACTIVE;
@@ -1782,14 +1931,8 @@ namespace olc
 
     void FUI_Combolist::draw(olc::PixelGameEngine* pge)
     {
-        // Adapt positioning depending on if there's a parent to the element or not
-        if (parent)
-            adaptive_position = get_absolute_position();
-        else
-            adaptive_position = olc::vi2d{ 0, 0 };
-
-        auto absolute_position = adaptive_position + position;
-        auto title_text_size = pge->GetTextSizeProp(text) * text_scale;
+        absolute_position = get_absolute_position();
+        auto title_text_size = static_cast<olc::vf2d>(pge->GetTextSizeProp(text))* text_scale;
 
         if (is_open)
         {
@@ -1827,7 +1970,7 @@ namespace olc
         if (selected_elements.size() > 1)
         {
             std::string temp_text = selected_elements[0].second.second + ", ...";
-            auto element_text_size = pge->GetTextSizeProp(temp_text) * selected_elements[0].second.first;
+            auto element_text_size = static_cast<olc::vf2d>(pge->GetTextSizeProp(temp_text))* selected_elements[0].second.first;
 
             text_position = olc::vf2d{ absolute_position.x + (size.x / 2) - (element_text_size.x / 2),
                 absolute_position.y + (size.y / 2) - (element_text_size.y / 2) };
@@ -1835,7 +1978,7 @@ namespace olc
         }
         else if (selected_elements.size() > 0)
         {
-            auto element_text_size = pge->GetTextSizeProp(selected_elements[0].second.second) * selected_elements[0].second.first;
+            auto element_text_size = static_cast<olc::vf2d>(pge->GetTextSizeProp(selected_elements[0].second.second))* selected_elements[0].second.first;
 
             text_position = olc::vf2d{ absolute_position.x + (size.x / 2) - (element_text_size.x / 2),
                 absolute_position.y + (size.y / 2) - (element_text_size.y / 2) };
@@ -1847,7 +1990,7 @@ namespace olc
             int i = 1;
             for (int j = item_start_index - 1; j < item_start_index + max_display_items - 1; j++)
             {
-                auto element_text_size = pge->GetTextSizeProp(elements[j].second.second.second) * elements[j].second.second.first;
+                auto element_text_size = static_cast<olc::vf2d>(pge->GetTextSizeProp(elements[j].second.second.second))* elements[j].second.second.first;
                 if (active_size.y >= size.y * i)
                 {
                     switch (elements[j].second.first)
@@ -1885,7 +2028,7 @@ namespace olc
             int i = 1;
             for (auto& element : elements)
             {
-                auto element_text_size = pge->GetTextSizeProp(element.second.second.second) * element.second.second.first;
+                auto element_text_size = static_cast<olc::vf2d>(pge->GetTextSizeProp(element.second.second.second))* element.second.second.first;
                 if (active_size.y >= size.y * i)
                 {
                     switch (element.second.first)
@@ -1912,10 +2055,10 @@ namespace olc
 
     void FUI_Combolist::input(olc::PixelGameEngine* pge)
     {
-        if (pge->GetMousePos().x >= adaptive_position.x + position.x &&
-            pge->GetMousePos().x <= adaptive_position.x + position.x + size.x &&
-            pge->GetMousePos().y >= adaptive_position.y + position.y &&
-            pge->GetMousePos().y <= adaptive_position.y + position.y + size.y)
+        if (pge->GetMousePos().x >= absolute_position.x &&
+            pge->GetMousePos().x <= absolute_position.x + size.x &&
+            pge->GetMousePos().y >= absolute_position.y &&
+            pge->GetMousePos().y <= absolute_position.y + size.y)
         {
             if (pge->GetMouse(1).bPressed)
             {
@@ -1945,10 +2088,10 @@ namespace olc
                 int i = 1;
                 for (int j = item_start_index - 1; j < item_start_index + max_display_items - 1; j++)
                 {
-                    if (pge->GetMousePos().x >= adaptive_position.x + position.x &&
-                        pge->GetMousePos().x <= adaptive_position.x + position.x + size.x &&
-                        pge->GetMousePos().y > adaptive_position.y + position.y + (size.y * i) &&
-                        pge->GetMousePos().y < adaptive_position.y + position.y + (size.y * i) + size.y)
+                    if (pge->GetMousePos().x >= absolute_position.x &&
+                        pge->GetMousePos().x <= absolute_position.x + size.x &&
+                        pge->GetMousePos().y > absolute_position.y + (size.y * i) &&
+                        pge->GetMousePos().y < absolute_position.y + (size.y * i) + size.y)
                     {
                         if (pge->GetMouse(0).bPressed)
                         {
@@ -1975,7 +2118,7 @@ namespace olc
                             if (!did_find_element)
                             {
                                 elements[j].second.first = DropdownState::ACTIVE;
-                                selected_elements.push_back(std::make_pair(elements[j].first, elements[j].second.second));
+                                selected_elements.emplace_back(std::make_pair(elements[j].first, elements[j].second.second));
                             }
                         }
                         else if (elements[j].second.first != DropdownState::ACTIVE)
@@ -1985,10 +2128,10 @@ namespace olc
                         elements[j].second.first = DropdownState::NONE;
                     i++;
                 }
-                if (pge->GetMousePos().x >= adaptive_position.x + position.x &&
-                    pge->GetMousePos().x <= adaptive_position.x + position.x + size.x &&
-                    pge->GetMousePos().y >= adaptive_position.y + position.y &&
-                    pge->GetMousePos().y <= adaptive_position.y + position.y + size.y + active_size.y)
+                if (pge->GetMousePos().x >= absolute_position.x &&
+                    pge->GetMousePos().x <= absolute_position.x + size.x &&
+                    pge->GetMousePos().y >= absolute_position.y &&
+                    pge->GetMousePos().y <= absolute_position.y + size.y + active_size.y)
                 {
                     if (elements.size() > max_display_items)
                     {
@@ -2010,10 +2153,10 @@ namespace olc
                 int i = 1;
                 for (auto& element : elements)
                 {
-                    if (pge->GetMousePos().x >= adaptive_position.x + position.x &&
-                        pge->GetMousePos().x <= adaptive_position.x + position.x + size.x &&
-                        pge->GetMousePos().y > adaptive_position.y + position.y + (size.y * i) &&
-                        pge->GetMousePos().y < adaptive_position.y + position.y + (size.y * i) + size.y)
+                    if (pge->GetMousePos().x >= absolute_position.x &&
+                        pge->GetMousePos().x <= absolute_position.x + size.x &&
+                        pge->GetMousePos().y > absolute_position.y + (size.y * i) &&
+                        pge->GetMousePos().y < absolute_position.y + (size.y * i) + size.y)
                     {
                         if (pge->GetMouse(0).bPressed)
                         {
@@ -2040,7 +2183,7 @@ namespace olc
                             if (!did_find_element)
                             {
                                 element.second.first = DropdownState::ACTIVE;
-                                selected_elements.push_back(std::make_pair(element.first, element.second.second));
+                                selected_elements.emplace_back(std::make_pair(element.first, element.second.second));
                             }
                         }
                         else if (element.second.first != DropdownState::ACTIVE)
@@ -2053,10 +2196,10 @@ namespace olc
             }
         }
 
-        if (!(pge->GetMousePos().x >= adaptive_position.x + position.x &&
-            pge->GetMousePos().x <= adaptive_position.x + position.x + size.x &&
-            pge->GetMousePos().y >= adaptive_position.y + position.y &&
-            pge->GetMousePos().y <= adaptive_position.y + position.y + size.y + active_size.y) && pge->GetMouse(0).bPressed)
+        if (!(pge->GetMousePos().x >= absolute_position.x &&
+            pge->GetMousePos().x <= absolute_position.x + size.x &&
+            pge->GetMousePos().y >= absolute_position.y &&
+            pge->GetMousePos().y <= absolute_position.y + size.y + active_size.y) && pge->GetMouse(0).bPressed)
             is_open = false;
 
         if (is_open)
@@ -2112,14 +2255,8 @@ namespace olc
 
     void FUI_Groupbox::draw(olc::PixelGameEngine* pge)
     {
-        // Adapt positioning depending on if there's a parent to the element or not
-        if (parent)
-            adaptive_position = get_absolute_position();
-        else
-            adaptive_position = olc::vi2d{ 0, 0 };
-
-        auto absolute_position = position + adaptive_position;
-        auto text_size = pge->GetTextSizeProp(text) * text_scale;
+        absolute_position = get_absolute_position();
+        auto text_size = static_cast<olc::vf2d>(pge->GetTextSizeProp(text))* text_scale;
 
         pge->FillRectDecal(absolute_position, size, color_scheme.groupbox_background);
 
@@ -2261,13 +2398,7 @@ namespace olc
 
     void FUI_Slider::draw(olc::PixelGameEngine* pge)
     {
-        // Adapt positioning depending on if there's a parent to the element or not
-        if (parent)
-            adaptive_position = get_absolute_position();
-        else
-            adaptive_position = olc::vi2d{ 0, 0 };
-
-        auto absolute_position = position + adaptive_position;
+        absolute_position = get_absolute_position();
 
         // start with the value of the value_holder else set value to minimum in range
         if (run_once)
@@ -2337,7 +2468,7 @@ namespace olc
             break;
         }
 
-        auto text_size_title = pge->GetTextSizeProp(text) * text_scale;
+        auto text_size_title = static_cast<olc::vf2d>(pge->GetTextSizeProp(text))* text_scale;
         pge->DrawStringPropDecal(olc::vf2d{ absolute_position.x - text_size_title.x, absolute_position.y + (size.y / 2) - (text_size_title.y / 2) + 1 }, text, text_color);
         // draw slider body
         switch (state)
@@ -2354,7 +2485,7 @@ namespace olc
         }
 
         // Draw text ontop of the slider body
-        auto text_size = pge->GetTextSizeProp(temp_text) * text_scale;
+        auto text_size = static_cast<olc::vf2d>(pge->GetTextSizeProp(temp_text))* text_scale;
         pge->DrawStringPropDecal(olc::vf2d{ absolute_position.x + size.x / 2 - text_size.x / 2, absolute_position.y + (size.y / 2) - (text_size.y / 2) + 1 }, temp_text, text_color);
 
         // top left outline
@@ -2369,10 +2500,10 @@ namespace olc
 
     void FUI_Slider::input(olc::PixelGameEngine* pge)
     {
-        if (pge->GetMousePos().x >= adaptive_position.x + position.x &&
-            pge->GetMousePos().x <= adaptive_position.x + position.x + size.x &&
-            pge->GetMousePos().y >= adaptive_position.y + position.y &&
-            pge->GetMousePos().y <= adaptive_position.y + position.y + size.y)
+        if (pge->GetMousePos().x >= absolute_position.x &&
+            pge->GetMousePos().x <= absolute_position.x + size.x &&
+            pge->GetMousePos().y >= absolute_position.y &&
+            pge->GetMousePos().y <= absolute_position.y + size.y)
         {
             state = State::HOVER;
             if (pge->GetMouse(0).bHeld)
@@ -2390,14 +2521,14 @@ namespace olc
         if (state == State::ACTIVE)
         {
             if (has_negative)
-                if (((pge->GetMouseX() - (adaptive_position.x + position.x)) / size.x) <= 0.5)
+                if (((pge->GetMouseX() - (absolute_position.x)) / size.x) <= 0.5)
                 {
-                    ratio = (-1.0f * (pge->GetMouseX() - (adaptive_position.x + position.x)) / size.x) * 2.0f;
+                    ratio = (-1.0f * (pge->GetMouseX() - (absolute_position.x)) / size.x) * 2.0f;
                 }
                 else
-                    ratio = -1.0f + ((pge->GetMouseX() - (adaptive_position.x + position.x)) / size.x) * 2;
+                    ratio = -1.0f + ((pge->GetMouseX() - (absolute_position.x)) / size.x) * 2;
 
-            slider_ratio = (pge->GetMouseX() - (adaptive_position.x + position.x)) / size.x;
+            slider_ratio = (pge->GetMouseX() - (absolute_position.x)) / size.x;
 
             if (slider_ratio <= 0.0f)
                 slider_ratio = 0.0f;
@@ -2582,21 +2713,62 @@ namespace olc
         return std::string(1, text_noshift[index]);
     }
 
+
+    std::string FUI_Inputfield::get_clipboard_data()
+    {
+#ifdef _MSC_VER
+        if (OpenClipboard(NULL))
+        {
+            auto data = GetClipboardData(CF_TEXT);
+            std::string text = "";
+            try
+            {
+                text = (char*)data;
+            }
+            catch (char* e)
+            {
+                return text;
+            }
+            CloseClipboard();
+
+            return text;
+        }
+        else
+            return "";
+#endif
+        return "";
+    }
+
+    void FUI_Inputfield::copy_to_clipboard(std::string data)
+    {
+#ifdef _MSC_VER
+        if (data.size() > 0 && OpenClipboard(NULL))
+        {
+            EmptyClipboard();
+
+            HGLOBAL hg = GlobalAlloc(GMEM_MOVEABLE, data.size() + 1);
+            if (!hg) {
+                CloseClipboard();
+                return;
+            }
+            memcpy(GlobalLock(hg), data.c_str(), data.size() + 1);
+            GlobalUnlock(hg);
+            SetClipboardData(CF_TEXT, hg);
+            CloseClipboard();
+            GlobalFree(hg);
+        }
+#endif
+    }
+
     void FUI_Inputfield::draw(olc::PixelGameEngine* pge)
     {
-        // Adapt positioning depending on if there's a parent to the element or not
-        if (parent)
-            adaptive_position = get_absolute_position();
-        else
-            adaptive_position = olc::vi2d{ 0, 0 };
-
-        auto absolute_position = adaptive_position + position;
-        auto title_text_size = pge->GetTextSizeProp(text) * text_scale;
-        auto display_text_size = pge->GetTextSizeProp(displayed_text) * input_scale + olc::vf2d{ 2.f, 0.f };
+        absolute_position = get_absolute_position();
+        auto title_text_size = static_cast<olc::vf2d>(pge->GetTextSizeProp(text))* text_scale;
+        auto display_text_size = static_cast<olc::vf2d>(pge->GetTextSizeProp(displayed_text))* input_scale + olc::vf2d{ 2.f, 0.f };
         // title text
         auto text_position = olc::vf2d{ absolute_position.x - title_text_size.x, absolute_position.y + (size.y / 2) - (title_text_size.y / 2) };
         auto timer = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-        auto cursor_size = pge->GetTextSizeProp("_");
+        auto cursor_size = pge->GetTextSizeProp("_") * input_scale;
 
         pge->DrawStringPropDecal(text_position, text, text_color, text_scale);
 
@@ -2604,9 +2776,7 @@ namespace olc
         pge->FillRectDecal(absolute_position, size, color_scheme.inputfield_outline);
         // background
         pge->FillRectDecal(absolute_position + olc::vf2d{ 1.0f, 1.0f }, size - olc::vf2d{ 2.0f, 2.0f }, color_scheme.inputfield_background);
-        if (select_all)
-            pge->FillRectDecal(absolute_position, olc::vf2d(display_text_size.x * text_scale.x, size.y), color_scheme.inputfield_select_all_background);
-        
+
         // render the text ( + 3 in text_position is used as an offset to not render the first letter inside of the outline)
         text_position = olc::vf2d{ absolute_position.x + 3, absolute_position.y + (size.y / 2) - (display_text_size.y / 2) };
         auto cursor_position = olc::vf2d{ text_position.x + display_text_size.x, text_position.y + display_text_size.y };
@@ -2615,7 +2785,7 @@ namespace olc
         {
             if (mask_inputfield)
                 displayed_text += "*";
-            else
+            else if (displayed_text != inputfield_text)
                 displayed_text += inputfield_text.back();
             old_inputfield_text = inputfield_text;
         }
@@ -2625,10 +2795,42 @@ namespace olc
             displayed_text.erase(0, 1);
         }
 
+        if (clear_inputfield)
+        {
+            inputfield_text.clear();
+            displayed_text.clear();
+            text_out_of_view.clear();
+            old_inputfield_text.clear();
+
+            clear_inputfield = false;
+        }
+
+        if (!set_input_text.empty())
+        {
+            displayed_text = set_input_text;
+            inputfield_text = set_input_text;
+            set_input_text.clear();
+        }
+
         pge->DrawStringPropDecal(text_position, displayed_text, text_color, input_scale);
 
-        if (cursor_position.x + (cursor_size.x * input_scale.x) > absolute_position.x + size.x)
-            cursor_position.x -= (cursor_position.x + (cursor_size.x * input_scale.x)) - (absolute_position.x + size.x);
+        if (select_all)
+            pge->FillRectDecal(text_position, olc::vf2d(display_text_size.x, display_text_size.y), color_scheme.inputfield_select_all_background);
+
+        if (selected_chars > 0 && !select_all)
+        {
+            auto position = text_position;
+            for (int i = 1; i <= selected_chars; i++)
+            {
+                auto char_size = static_cast<olc::vf2d>(pge->GetTextSizeProp(displayed_text.substr(displayed_text.size() - i, 1)))* input_scale;
+                position.x -= char_size.x;
+                pge->FillRectDecal(olc::vf2d((position.x + display_text_size.x), position.y),
+                    olc::vf2d(char_size.x, display_text_size.y), color_scheme.inputfield_select_all_background);
+            }
+        }
+
+        if (cursor_position.x + cursor_size.x > absolute_position.x + size.x)
+            cursor_position.x -= (cursor_position.x + cursor_size.x) - (absolute_position.x + size.x);
 
         if (state == State::ACTIVE)
         {
@@ -2636,17 +2838,19 @@ namespace olc
             {
                 if (timer - last_cursor_tick > 1500)
                     last_cursor_tick = timer;
-                pge->FillRectDecal(cursor_position, { cursor_size.x * input_scale.x, 1.f }, color_scheme.inputfield_cursor);
+                pge->FillRectDecal(cursor_position, { static_cast<float>(cursor_size.x), 1.f }, color_scheme.inputfield_cursor);
             }
         }
     }
 
     void FUI_Inputfield::input(olc::PixelGameEngine* pge)
     {
-        if (pge->GetMousePos().x >= adaptive_position.x + position.x &&
-            pge->GetMousePos().x <= adaptive_position.x + position.x + size.x &&
-            pge->GetMousePos().y >= adaptive_position.y + position.y &&
-            pge->GetMousePos().y <= adaptive_position.y + position.y + size.y)
+        auto timer = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+
+        if (pge->GetMousePos().x >= absolute_position.x &&
+            pge->GetMousePos().x <= absolute_position.x + size.x &&
+            pge->GetMousePos().y >= absolute_position.y &&
+            pge->GetMousePos().y <= absolute_position.y + size.y)
         {
             if (pge->GetMouse(0).bPressed)
             {
@@ -2657,13 +2861,114 @@ namespace olc
         else if (pge->GetMouse(0).bPressed && is_focused)
             is_focused = false;
 
-        if (pge->GetKey(olc::ENTER).bPressed || pge->GetKey(olc::ESCAPE).bPressed)
-            is_focused = false;
-
         if (is_focused)
         {
-            if (pge->GetKey(olc::CTRL).bHeld && pge->GetKey(olc::A).bPressed)
+            if (pge->GetKey(olc::CTRL).bHeld && pge->GetKey(olc::A).bPressed && !displayed_text.empty())
+            {
+                selected_chars = inputfield_text.size();
                 select_all = true;
+            }
+
+            if (pge->GetKey(olc::ESCAPE).bPressed)
+                is_focused = false;
+
+            if (pge->GetKey(olc::ENTER).bPressed)
+            {
+                if (input_enter_callback)
+                    input_enter_callback();
+            }
+
+            if (pge->GetKey(olc::SHIFT).bHeld && pge->GetKey(olc::LEFT).bPressed && !displayed_text.empty())
+            {
+                if (selected_chars <= displayed_text.size() - 1)
+                {
+                    if (select_all)
+                        select_all = false;
+                    selected_chars++;
+                }
+            }
+
+            if (pge->GetKey(olc::SHIFT).bHeld && pge->GetKey(olc::RIGHT).bPressed && selected_chars > 0)
+            {
+                if (select_all)
+                    select_all = false;
+                selected_chars--;
+            }
+
+            if (pge->GetKey(olc::CTRL).bHeld && pge->GetKey(olc::V).bPressed)
+            {
+                if (select_all)
+                {
+                    inputfield_text.clear();
+                    displayed_text.clear();
+                    text_out_of_view.clear();
+                    old_inputfield_text.clear();
+                }
+                if (selected_chars > 0 && !select_all)
+                {
+                    inputfield_text.erase(inputfield_text.size() - selected_chars, inputfield_text.size());
+                    displayed_text.erase(displayed_text.size() - selected_chars, displayed_text.size());
+                    selected_chars = 0;
+                }
+                auto data = get_clipboard_data();
+                if (data.size() > 0)
+                {
+                    inputfield_text.append(data);
+                    displayed_text.append(data);
+                }
+
+                if (select_all)
+                    select_all = false;
+            }
+
+            if (pge->GetKey(olc::CTRL).bHeld && pge->GetKey(olc::C).bPressed)
+            {
+                if (select_all)
+                    copy_to_clipboard(inputfield_text);
+                if (selected_chars > 0 && !select_all)
+                {
+                    //copy_to_clipboard(inputfield_text.substr(inputfield_text.size() - selected_chars, inputfield_text.size()));
+                    copy_to_clipboard(displayed_text.substr(displayed_text.size() - selected_chars, displayed_text.size()));
+                }
+            }
+
+            // related to holding backspace for deletion of characters
+            if (pge->GetKey(olc::BACK).bPressed && initial_backspace)
+                hold_backspace_tick = timer;
+
+            // Remove last character if backspace is pressed / remove selected_char amount if text is selected
+            if (pge->GetKey(olc::BACK).bHeld && !select_all && inputfield_text.size() > 0 &&
+                (initial_backspace || timer - hold_backspace_tick > 500) && timer - last_backspace_tick > 50)
+            {
+                initial_backspace = false;
+                if (selected_chars > 0)
+                {
+                    inputfield_text.erase(inputfield_text.size() - selected_chars, inputfield_text.size());
+                    displayed_text.erase(displayed_text.size() - selected_chars, displayed_text.size());
+                    old_inputfield_text.erase(old_inputfield_text.size() - selected_chars, old_inputfield_text.size());
+                    if (text_out_of_view.size() > 0)
+                    {
+                        displayed_text.insert(0, &text_out_of_view.back());
+                        text_out_of_view.pop_back();
+                    }
+                    selected_chars = 0;
+                }
+                else
+                {
+                    inputfield_text.pop_back();
+                    displayed_text.pop_back();
+                    old_inputfield_text.pop_back();
+                    if (text_out_of_view.size() > 0)
+                    {
+                        displayed_text.insert(0, &text_out_of_view.back());
+                        text_out_of_view.pop_back();
+                    }
+                }
+                last_backspace_tick = timer;
+            }
+
+            if (!pge->GetKey(olc::BACK).bHeld)
+                initial_backspace = true;
 
             // Clear text
             if ((select_all && get_char_from_id(pge).size() > 0 && !pge->GetKey(olc::CTRL).bHeld) ||
@@ -2674,18 +2979,7 @@ namespace olc
                 text_out_of_view.clear();
                 old_inputfield_text.clear();
                 select_all = false;
-            }
-            // Remove last character if backspace is pressed
-            if (pge->GetKey(olc::BACK).bPressed && !select_all && inputfield_text.size() > 0)
-            {
-                inputfield_text.pop_back();
-                displayed_text.pop_back();
-                old_inputfield_text.pop_back();
-                if (text_out_of_view.size() > 0)
-                {
-                    displayed_text.insert(0, &text_out_of_view.back());
-                    text_out_of_view.pop_back();
-                }
+                selected_chars = 0;
             }
 
             // Append character to string
@@ -2699,6 +2993,193 @@ namespace olc
             state = State::NONE;
     }
 
+    FUI_Console::FUI_Console(const std::string& id, FUI_Window* parent, const std::string& title, olc::vi2d position, olc::vi2d size, int input_thickness = 10)
+    {
+        identifier = id;
+        this->parent = parent;
+        text = title;
+        this->position = position;
+        this->size = size;
+        this->input_thickness = input_thickness;
+        inputfield.set_size({ size.x, input_thickness });
+        ui_type = FUI_Type::CONSOLE;
+    }
+
+    FUI_Console::FUI_Console(const std::string& id, FUI_Window* parent, const std::string& group, const std::string& title, olc::vi2d position, olc::vi2d size, int input_thickness = 10)
+    {
+        identifier = id;
+        this->parent = parent;
+        text = title;
+        this->position = position;
+        this->size = size;
+        this->group = group;
+        this->input_thickness = input_thickness;
+        inputfield.set_size({ size.x, input_thickness });
+        ui_type = FUI_Type::CONSOLE;
+    }
+
+    FUI_Console::FUI_Console(const std::string& id, const std::string& title, olc::vi2d position, olc::vi2d size, int input_thickness = 10)
+    {
+        identifier = id;
+        this->parent = parent;
+        text = title;
+        this->position = position;
+        this->size = size;
+        this->input_thickness = input_thickness;
+        inputfield.set_size({ size.x, input_thickness });
+        ui_type = FUI_Type::CONSOLE;
+    }
+
+    FUI_Console::FUI_Console(const std::string& id, const std::string& group, const std::string& title, olc::vi2d position, olc::vi2d size, int input_thickness = 10)
+    {
+        identifier = id;
+        this->parent = parent;
+        text = title;
+        this->position = position;
+        this->size = size;
+        this->group = group;
+        this->input_thickness = input_thickness;
+        inputfield.set_size({ size.x, input_thickness });
+        ui_type = FUI_Type::CONSOLE;
+    }
+
+    void FUI_Console::draw(olc::PixelGameEngine* pge)
+    {
+        absolute_position = get_absolute_position() + olc::vf2d{ 0, 1 };
+
+        inputfield.inputfield_scale(text_scale);
+        inputfield.set_position({ absolute_position.x, absolute_position.y + size.y - 1 - input_thickness });
+
+        // outline
+        pge->FillRectDecal(absolute_position, { size.x , size.y - input_thickness }, color_scheme.console_outline);
+        // body
+        pge->FillRectDecal({ absolute_position.x + 1, absolute_position.y + 1 }, { size.x - 2, size.y - input_thickness - 2 }, color_scheme.console_background);
+
+        // title text
+        auto title_size = static_cast<olc::vf2d>(pge->GetTextSizeProp(text))* text_scale;
+        auto text_pos = olc::vf2d{ absolute_position.x + (size.x / 2) - (title_size.x / 2) , absolute_position.y + 1 };
+        pge->DrawStringPropDecal(text_pos, text, text_color, text_scale);
+        pge->FillRectDecal({ absolute_position.x, absolute_position.y + title_size.y }, { size.x, 1 }, color_scheme.console_outline);
+
+        if (run_once)
+        {
+            scroll_threshold = size.y - 1 - input_thickness - title_size.y;
+            run_once = false;
+        }
+
+        if (should_clear_console)
+        {
+            executed_commands.clear();
+            scroll_index = 0;
+            should_clear_console = false;
+        }
+
+        // console text
+        int j = 0;
+        commands_shown = 1;
+        for (int i = scroll_index; i < executed_commands.size(); i++)
+        {
+            auto text_size = static_cast<olc::vf2d>(pge->GetTextSizeProp(executed_commands[i]))* text_scale;
+            if (title_size.y + (text_size.y * j) <= scroll_threshold)
+            {
+                pge->DrawStringPropDecal({ absolute_position.x, absolute_position.y + title_size.y + 2 + (text_size.y * j) }, executed_commands[i], text_color, text_scale);
+                commands_shown++;
+            }
+            j++;
+        }
+
+        inputfield.draw(pge);
+    }
+
+    void FUI_Console::input(olc::PixelGameEngine* pge)
+    {
+        if (inputfield.get_focused_status() || !command_entry.empty())
+        {
+            // instantly jump to the top or bottom
+            if (pge->GetKey(olc::CTRL).bHeld && pge->GetKey(olc::UP).bPressed)
+                scroll_index = 0;
+            else if (pge->GetKey(olc::CTRL).bHeld && pge->GetKey(olc::DOWN).bPressed)
+                scroll_index = (executed_commands.size() - commands_shown) + 1;
+
+            if (pge->GetKey(olc::ENTER).bPressed || !command_entry.empty())
+            {
+                command = inputfield.get_inputfield_value();
+                if (!command_entry.empty())
+                    command = command_entry;
+                if (!command.empty())
+                {
+                    std::string temp1;
+                    if (command_entry.empty())
+                    {
+                        command_handler(command, &executed_command);
+                        temp1 = get_time() + " - " + executed_command;
+                    }
+                    else
+                        temp1 = get_time() + " - " + command;
+                    auto text_size = static_cast<olc::vf2d>(pge->GetTextSizeProp(temp1))* text_scale;
+                    auto size_to_remove = 0.f;
+                    while (text_size.x > size.x)
+                    {
+                        text_size = static_cast<olc::vf2d>(pge->GetTextSizeProp(temp1))* text_scale;
+                        size_to_remove = text_size.x - size.x;
+                        size_to_remove = size_to_remove / text_size.x;
+                        size_to_remove = size_to_remove * temp1.size();
+
+                        size_to_remove = temp1.size() - std::ceil(size_to_remove);
+                        if (size_to_remove < temp1.size())
+                            temp1.erase(size_to_remove, temp1.size());
+                        else
+                            break;
+                    }
+                    executed_commands.push_back(temp1);
+                    inputfield.clear_inputfield_value();
+
+                    auto title_size = pge->GetTextSizeProp(text) * text_scale;
+
+                    if (scroll_threshold > 0 && text_size.y * commands_shown >= scroll_threshold)
+                        scroll_index++;
+
+                    //std::cout << "index: " << scroll_index << std::endl;
+
+
+                    if (scroll_index > 0 && scroll_index < (executed_commands.size() - commands_shown) + 1 && text_size.y * commands_shown >= scroll_threshold)
+                        scroll_index = (executed_commands.size() - commands_shown) + 1;
+
+                    //unsure why I added this line here, if I figure it out back in it goes :)
+                    //if (title_size.y + (text_size.y * executed_commands.size()) >= scroll_threshold)
+                    //   scroll_index++;
+
+                    if (!command_entry.empty())
+                        command_entry.clear();
+                    else
+                        last_executed_command = command;
+                }
+            }
+
+            if (executed_commands.size() > 0 && pge->GetKey(olc::UP).bPressed && !(pge->GetKey(olc::CTRL).bHeld || pge->GetKey(olc::SHIFT).bHeld))
+                inputfield.set_inputfield_value(last_executed_command);
+        }
+
+        if (pge->GetMousePos().x >= absolute_position.x &&
+            pge->GetMousePos().x <= absolute_position.x + size.x &&
+            pge->GetMousePos().y >= absolute_position.y &&
+            pge->GetMousePos().y <= absolute_position.y + size.y)
+        {
+            if (pge->GetMouseWheel() > 0)
+            {
+                if (scroll_index > 0)
+                    scroll_index--;
+            }
+            else if (pge->GetMouseWheel() < 0)
+            {
+                if (scroll_index < executed_commands.size() - 1)
+                    scroll_index++;
+            }
+        }
+
+        inputfield.input(pge);
+    }
+
     /*
     ####################################################
     #               FUI_HANDLER START                  #
@@ -2708,6 +3189,8 @@ namespace olc
     {
         for (auto& window : windows)
         {
+            if (window->get_closed_state())
+                continue;
             if (window->is_focused())
                 return true;
         }
@@ -2732,7 +3215,7 @@ namespace olc
                     pge->GetMousePos().y <= adaptive.y + position.y + (size.y * amount) + size.y))
                     return true;
             }
-                    
+
         }
         return false;
     }
@@ -2756,7 +3239,7 @@ namespace olc
             }
             for (auto& element : elements)
             {
-                if (element->get_ui_type() == FUI_Type::INPUTFIELD && j > i && input_was_focused)
+                if (element->get_ui_type() == FUI_Type::INPUTFIELD && j > i&& input_was_focused)
                 {
                     element->set_focused_status(true);
                     break;
@@ -2764,6 +3247,21 @@ namespace olc
                 j++;
             }
         }
+    }
+
+    bool FrostUI::is_cursor_in_window()
+    {
+        for (auto& window : windows)
+        {
+            if (window->get_closed_state())
+                continue;
+            auto pos = window->get_position();
+            auto size = window->get_size();
+            if (pge->GetMousePos().x > pos.x&& pge->GetMousePos().x <= pos.x + size.x)
+                if (pge->GetMousePos().y > pos.y&& pge->GetMousePos().y <= pos.y + size.y)
+                    return true;
+        }
+        return false;
     }
 
     void FrostUI::push_focused_to_back()
@@ -2778,7 +3276,7 @@ namespace olc
             }
             if (window->is_focused())
             {
-                windows.push_back(window);
+                windows.emplace_back(window);
                 windows.erase(windows.begin() + i);
             }
             i++;
@@ -2792,7 +3290,7 @@ namespace olc
         {
             if (element->get_focused_status())
             {
-                elements.push_back(element);
+                elements.emplace_back(element);
                 elements.erase(elements.begin() + i);
             }
             i++;
@@ -2846,7 +3344,7 @@ namespace olc
         }
         if (!is_duplicate)
         {
-            windows.push_back(new FUI_Window{ pge, identifier, position, size, title });
+            windows.emplace_back(new FUI_Window{ pge, identifier, position, size, title });
             temp_window = windows.back();
         }
         else
@@ -2867,7 +3365,7 @@ namespace olc
                 is_duplicate = true;
         }
         if (!is_duplicate)
-            groups.push_back(std::make_pair(window_id, group_id));
+            groups.emplace_back(std::make_pair(window_id, group_id));
         else
             std::cout << "Cannot add duplicates of same group (function affected: add_group, affected group_id: " + group_id + ")\n";
     }
@@ -2915,6 +3413,35 @@ namespace olc
         }
     }
 
+    void FrostUI::remove_window(const std::string& id)
+    {
+        int i = 0;
+        for (auto& window : windows)
+        {
+            if (window->get_id() == id)
+            {
+                int j = 0;
+                for (auto& element : elements)
+                {
+                    if (!element->get_parent())
+                    {
+                        j++;
+                        continue;
+                    }
+                    if (element->get_parent()->get_id() == id)
+                    {
+                        elements.erase(elements.begin() + j);
+                        break;
+                    }
+                    j++;
+                }
+                windows.erase(windows.begin() + i);
+                break;
+            }
+            i++;
+        }
+    }
+
     std::shared_ptr<FUI_Element> FrostUI::find_element(const std::string& id)
     {
         for (auto& element : elements)
@@ -2941,16 +3468,22 @@ namespace olc
         {
             if (windows.size() > 0)
             {
+                bool did_add = false;
                 for (auto& window : windows)
                 {
                     if (window->get_id() == parent_id)
+                    {
+                        did_add = true;
                         if (!active_group.second.empty())
-                            elements.push_back(std::make_shared<FUI_Label>(identifier, window, text, position));
+                            elements.emplace_back(std::make_shared<FUI_Label>(identifier, window, text, position));
                         else
-                            elements.push_back(std::make_shared<FUI_Label>(identifier, window, active_group.second, text, position));
-                    else
-                        std::cout << "Could not find parent window ID (function affected: add_label, label_id affected: " + identifier + ")\n";
+                            elements.emplace_back(std::make_shared<FUI_Label>(identifier, window, active_group.second, text, position));
+
+                        break;
+                    }
                 }
+                if (!did_add)
+                    std::cout << "Could not find parent window ID (function affected: add_label, label_id affected: " + identifier + ")\n";
             }
             else
                 std::cout << "There's no windows to be used as parent (function affected: add_label, label_id affected: " + identifier + ")\n";
@@ -2969,16 +3502,16 @@ namespace olc
                 {
                     if (window->get_id() == active_window_id)
                         if (!active_group.second.empty())
-                            elements.push_back(std::make_shared<FUI_Label>(identifier, window, active_group.second, text, position));
+                            elements.emplace_back(std::make_shared<FUI_Label>(identifier, window, active_group.second, text, position));
                         else
-                            elements.push_back(std::make_shared<FUI_Label>(identifier, window, text, position));
+                            elements.emplace_back(std::make_shared<FUI_Label>(identifier, window, text, position));
                 }
             }
             else
                 if (!active_group.second.empty())
-                    elements.push_back(std::make_shared<FUI_Label>(identifier, active_group.second, text, position));
+                    elements.emplace_back(std::make_shared<FUI_Label>(identifier, active_group.second, text, position));
                 else
-                    elements.push_back(std::make_shared<FUI_Label>(identifier, text, position));
+                    elements.emplace_back(std::make_shared<FUI_Label>(identifier, text, position));
         }
         else
             std::cout << "Duplicate IDs found (function affected: add_label, label_id affected: " + identifier + ")\n";
@@ -2990,16 +3523,22 @@ namespace olc
         {
             if (windows.size() > 0)
             {
+                bool did_add = false;
                 for (auto& window : windows)
                 {
                     if (window->get_id() == parent_id)
+                    {
+                        did_add = true;
                         if (!active_group.second.empty())
-                            elements.push_front(std::make_shared<FUI_Checkbox>(identifier, window, text, position, size, cb_state));
+                            elements.emplace_front(std::make_shared<FUI_Checkbox>(identifier, window, text, position, size, cb_state));
                         else
-                            elements.push_front(std::make_shared<FUI_Checkbox>(identifier, window, active_group.second, text, position, size, cb_state));
-                    else
-                        std::cout << "Could not find parent window ID (function affected: add_checkbox, checkbox_id affected: " + identifier + ")\n";
+                            elements.emplace_front(std::make_shared<FUI_Checkbox>(identifier, window, active_group.second, text, position, size, cb_state));
+
+                        break;
+                    }
                 }
+                if (!did_add)
+                    std::cout << "Could not find parent window ID (function affected: add_checkbox, checkbox_id affected: " + identifier + ")\n";
             }
             else
                 std::cout << "There's no windows to be used as parent (function affected: add_checkbox, checkbox_id affected: " + identifier + ")\n";
@@ -3018,16 +3557,16 @@ namespace olc
                 {
                     if (window->get_id() == active_window_id)
                         if (!active_group.second.empty())
-                            elements.push_front(std::make_shared<FUI_Checkbox>(identifier, window, active_group.second, text, position, size, cb_state));
+                            elements.emplace_front(std::make_shared<FUI_Checkbox>(identifier, window, active_group.second, text, position, size, cb_state));
                         else
-                            elements.push_front(std::make_shared<FUI_Checkbox>(identifier, window, text, position, size, cb_state));
+                            elements.emplace_front(std::make_shared<FUI_Checkbox>(identifier, window, text, position, size, cb_state));
                 }
             }
             else
                 if (!active_group.second.empty())
-                    elements.push_front(std::make_shared<FUI_Checkbox>(identifier, active_group.second, text, position, size, cb_state));
+                    elements.emplace_front(std::make_shared<FUI_Checkbox>(identifier, active_group.second, text, position, size, cb_state));
                 else
-                    elements.push_front(std::make_shared<FUI_Checkbox>(identifier, text, position, size, cb_state));
+                    elements.emplace_front(std::make_shared<FUI_Checkbox>(identifier, text, position, size, cb_state));
         }
         else
             std::cout << "Duplicate IDs found (function affected: add_checkbox, checkbox_id affected: " + identifier + ")\n";
@@ -3039,16 +3578,22 @@ namespace olc
         {
             if (windows.size() > 0)
             {
+                bool did_add = false;
                 for (auto& window : windows)
                 {
                     if (window->get_id() == parent_id)
+                    {
+                        did_add = true;
                         if (!active_group.second.empty())
-                            elements.push_back(std::make_shared<FUI_Dropdown>(identifier, window, text, position, size));
+                            elements.emplace_back(std::make_shared<FUI_Dropdown>(identifier, window, text, position, size));
                         else
-                            elements.push_back(std::make_shared<FUI_Dropdown>(identifier, window, active_group.second, text, position, size));
-                    else
-                        std::cout << "Could not find parent window ID (function affected: add_dropdown, dropdown_id affected: " + identifier + ")\n";
+                            elements.emplace_back(std::make_shared<FUI_Dropdown>(identifier, window, active_group.second, text, position, size));
+
+                        break;
+                    }
                 }
+                if (!did_add)
+                    std::cout << "Could not find parent window ID (function affected: add_dropdown, dropdown_id affected: " + identifier + ")\n";
             }
             else
                 std::cout << "There's no windows to be used as parent (function affected: add_dropdown, dropdown_id affected: " + identifier + ")\n";
@@ -3067,16 +3612,16 @@ namespace olc
                 {
                     if (window->get_id() == active_window_id)
                         if (!active_group.second.empty())
-                            elements.push_back(std::make_shared<FUI_Dropdown>(identifier, window, active_group.second, text, position, size));
+                            elements.emplace_back(std::make_shared<FUI_Dropdown>(identifier, window, active_group.second, text, position, size));
                         else
-                            elements.push_back(std::make_shared<FUI_Dropdown>(identifier, window, text, position, size));
+                            elements.emplace_back(std::make_shared<FUI_Dropdown>(identifier, window, text, position, size));
                 }
             }
             else
                 if (!active_group.second.empty())
-                    elements.push_back(std::make_shared<FUI_Dropdown>(identifier, active_group.second, text, position, size));
+                    elements.emplace_back(std::make_shared<FUI_Dropdown>(identifier, active_group.second, text, position, size));
                 else
-                    elements.push_back(std::make_shared<FUI_Dropdown>(identifier, text, position, size));
+                    elements.emplace_back(std::make_shared<FUI_Dropdown>(identifier, text, position, size));
         }
         else
             std::cout << "Duplicate IDs found (function affected: add_dropdown, dropdown_id affected: " + identifier + ")\n";
@@ -3088,16 +3633,22 @@ namespace olc
         {
             if (windows.size() > 0)
             {
+                bool did_add = false;
                 for (auto& window : windows)
                 {
                     if (window->get_id() == parent_id)
+                    {
+                        did_add = true;
                         if (!active_group.second.empty())
-                            elements.push_back(std::make_shared<FUI_Combolist>(identifier, window, text, position, size));
+                            elements.emplace_back(std::make_shared<FUI_Combolist>(identifier, window, text, position, size));
                         else
-                            elements.push_back(std::make_shared<FUI_Combolist>(identifier, window, active_group.second, text, position, size));
-                    else
-                        std::cout << "Could not find parent window ID (function affected: add_combolist, combolist_id affected: " + identifier + ")\n";
+                            elements.emplace_back(std::make_shared<FUI_Combolist>(identifier, window, active_group.second, text, position, size));
+
+                        break;
+                    }
                 }
+                if (!did_add)
+                    std::cout << "Could not find parent window ID (function affected: add_combolist, combolist_id affected: " + identifier + ")\n";
             }
             else
                 std::cout << "There's no windows to be used as parent (function affected: add_combolist, combolist_id affected: " + identifier + ")\n";
@@ -3116,16 +3667,16 @@ namespace olc
                 {
                     if (window->get_id() == active_window_id)
                         if (!active_group.second.empty())
-                            elements.push_back(std::make_shared<FUI_Combolist>(identifier, window, active_group.second, text, position, size));
+                            elements.emplace_back(std::make_shared<FUI_Combolist>(identifier, window, active_group.second, text, position, size));
                         else
-                            elements.push_back(std::make_shared<FUI_Combolist>(identifier, window, text, position, size));
+                            elements.emplace_back(std::make_shared<FUI_Combolist>(identifier, window, text, position, size));
                 }
             }
             else
                 if (!active_group.second.empty())
-                    elements.push_back(std::make_shared<FUI_Combolist>(identifier, active_group.second, text, position, size));
+                    elements.emplace_back(std::make_shared<FUI_Combolist>(identifier, active_group.second, text, position, size));
                 else
-                    elements.push_back(std::make_shared<FUI_Combolist>(identifier, text, position, size));
+                    elements.emplace_back(std::make_shared<FUI_Combolist>(identifier, text, position, size));
         }
         else
             std::cout << "Duplicate IDs found (function affected: add_combolist, combolist_id affected: " + identifier + ")\n";
@@ -3137,16 +3688,22 @@ namespace olc
         {
             if (windows.size() > 0)
             {
+                bool did_add = false;
                 for (auto& window : windows)
                 {
                     if (window->get_id() == parent_id)
+                    {
+                        did_add = true;
                         if (!active_group.second.empty())
-                            groupboxes.push_back(std::make_shared<FUI_Groupbox>(identifier, window, text, position, size));
+                            groupboxes.emplace_back(std::make_shared<FUI_Groupbox>(identifier, window, text, position, size));
                         else
-                            groupboxes.push_back(std::make_shared<FUI_Groupbox>(identifier, window, active_group.second, text, position, size));
-                    else
-                        std::cout << "Could not find parent window ID (function affected: add_groupbox, groupbox_id affected: " + identifier + ")\n";
+                            groupboxes.emplace_back(std::make_shared<FUI_Groupbox>(identifier, window, active_group.second, text, position, size));
+
+                        break;
+                    }
                 }
+                if (!did_add)
+                    std::cout << "Could not find parent window ID (function affected: add_groupbox, groupbox_id affected: " + identifier + ")\n";
             }
             else
                 std::cout << "There's no windows to be used as parent (function affected: add_groupbox, groupbox_id affected: " + identifier + ")\n";
@@ -3165,16 +3722,16 @@ namespace olc
                 {
                     if (window->get_id() == active_window_id)
                         if (!active_group.second.empty())
-                            groupboxes.push_back(std::make_shared<FUI_Groupbox>(identifier, window, active_group.second, text, position, size));
+                            groupboxes.emplace_back(std::make_shared<FUI_Groupbox>(identifier, window, active_group.second, text, position, size));
                         else
-                            groupboxes.push_back(std::make_shared<FUI_Groupbox>(identifier, window, text, position, size));
+                            groupboxes.emplace_back(std::make_shared<FUI_Groupbox>(identifier, window, text, position, size));
                 }
             }
             else
                 if (!active_group.second.empty())
-                    groupboxes.push_back(std::make_shared<FUI_Groupbox>(identifier, active_group.second, text, position, size));
+                    groupboxes.emplace_back(std::make_shared<FUI_Groupbox>(identifier, active_group.second, text, position, size));
                 else
-                    groupboxes.push_back(std::make_shared<FUI_Groupbox>(identifier, text, position, size));
+                    groupboxes.emplace_back(std::make_shared<FUI_Groupbox>(identifier, text, position, size));
         }
         else
             std::cout << "Duplicate IDs found (function affected: add_groupbox, groupbox_id affected: " + identifier + ")\n";
@@ -3186,16 +3743,22 @@ namespace olc
         {
             if (windows.size() > 0)
             {
+                bool did_add = false;
                 for (auto& window : windows)
                 {
                     if (window->get_id() == parent_id)
+                    {
+                        did_add = true;
                         if (!active_group.second.empty())
-                            elements.push_back(std::make_shared<FUI_Slider>(identifier, window, text, position, size, range, value_holder, FUI_Slider::type::FLOAT));
+                            elements.emplace_back(std::make_shared<FUI_Slider>(identifier, window, text, position, size, range, value_holder, FUI_Slider::type::FLOAT));
                         else
-                            elements.push_back(std::make_shared<FUI_Slider>(identifier, window, active_group.second, text, position, size, range, value_holder, FUI_Slider::type::FLOAT));
-                    else
-                        std::cout << "Could not find parent window ID (function affected: add_slider, slider_id affected: " + identifier + ")\n";
+                            elements.emplace_back(std::make_shared<FUI_Slider>(identifier, window, active_group.second, text, position, size, range, value_holder, FUI_Slider::type::FLOAT));
+                    
+                        break;
+                    }
                 }
+                if (!did_add)
+                    std::cout << "Could not find parent window ID (function affected: add_slider, slider_id affected: " + identifier + ")\n";
             }
             else
                 std::cout << "There's no windows to be used as parent (function affected: add_slider, slider_id affected: " + identifier + ")\n";
@@ -3214,16 +3777,16 @@ namespace olc
                 {
                     if (window->get_id() == active_window_id)
                         if (!active_group.second.empty())
-                            elements.push_back(std::make_shared<FUI_Slider>(identifier, window, active_group.second, text, position, size, range, value_holder, FUI_Slider::type::FLOAT));
+                            elements.emplace_back(std::make_shared<FUI_Slider>(identifier, window, active_group.second, text, position, size, range, value_holder, FUI_Slider::type::FLOAT));
                         else
-                            elements.push_back(std::make_shared<FUI_Slider>(identifier, window, text, position, size, range, value_holder, FUI_Slider::type::FLOAT));
+                            elements.emplace_back(std::make_shared<FUI_Slider>(identifier, window, text, position, size, range, value_holder, FUI_Slider::type::FLOAT));
                 }
             }
             else
                 if (!active_group.second.empty())
-                    elements.push_back(std::make_shared<FUI_Slider>(identifier, active_group.second, text, position, size, range, value_holder, FUI_Slider::type::FLOAT));
+                    elements.emplace_back(std::make_shared<FUI_Slider>(identifier, active_group.second, text, position, size, range, value_holder, FUI_Slider::type::FLOAT));
                 else
-                    elements.push_back(std::make_shared<FUI_Slider>(identifier, text, position, size, range, value_holder, FUI_Slider::type::FLOAT));
+                    elements.emplace_back(std::make_shared<FUI_Slider>(identifier, text, position, size, range, value_holder, FUI_Slider::type::FLOAT));
         }
         else
             std::cout << "Duplicate IDs found (function affected: add_slider, slider_id affected: " + identifier + ")\n";
@@ -3235,16 +3798,22 @@ namespace olc
         {
             if (windows.size() > 0)
             {
+                bool did_add = false;
                 for (auto& window : windows)
                 {
                     if (window->get_id() == parent_id)
+                    {
+                        did_add = true;
                         if (!active_group.second.empty())
-                            elements.push_back(std::make_shared<FUI_Slider>(identifier, window, text, position, size, range, value_holder, FUI_Slider::type::INT));
+                            elements.emplace_back(std::make_shared<FUI_Slider>(identifier, window, text, position, size, range, value_holder, FUI_Slider::type::INT));
                         else
-                            elements.push_back(std::make_shared<FUI_Slider>(identifier, window, active_group.second, text, position, size, range, value_holder, FUI_Slider::type::INT));
-                    else
-                        std::cout << "Could not find parent window ID (function affected: add_slider, slider_id affected: " + identifier + ")\n";
+                            elements.emplace_back(std::make_shared<FUI_Slider>(identifier, window, active_group.second, text, position, size, range, value_holder, FUI_Slider::type::INT));
+                    
+                        break;
+                    }
                 }
+                if (!did_add)
+                    std::cout << "Could not find parent window ID (function affected: add_slider, slider_id affected: " + identifier + ")\n";
             }
             else
                 std::cout << "There's no windows to be used as parent (function affected: add_slider, slider_id affected: " + identifier + ")\n";
@@ -3263,16 +3832,16 @@ namespace olc
                 {
                     if (window->get_id() == active_window_id)
                         if (!active_group.second.empty())
-                            elements.push_back(std::make_shared<FUI_Slider>(identifier, window, active_group.second, text, position, size, range, value_holder, FUI_Slider::type::INT));
+                            elements.emplace_back(std::make_shared<FUI_Slider>(identifier, window, active_group.second, text, position, size, range, value_holder, FUI_Slider::type::INT));
                         else
-                            elements.push_back(std::make_shared<FUI_Slider>(identifier, window, text, position, size, range, value_holder, FUI_Slider::type::INT));
+                            elements.emplace_back(std::make_shared<FUI_Slider>(identifier, window, text, position, size, range, value_holder, FUI_Slider::type::INT));
                 }
             }
             else
                 if (!active_group.second.empty())
-                    elements.push_back(std::make_shared<FUI_Slider>(identifier, active_group.second, text, position, size, range, value_holder, FUI_Slider::type::INT));
+                    elements.emplace_back(std::make_shared<FUI_Slider>(identifier, active_group.second, text, position, size, range, value_holder, FUI_Slider::type::INT));
                 else
-                    elements.push_back(std::make_shared<FUI_Slider>(identifier, text, position, size, range, value_holder, FUI_Slider::type::INT));
+                    elements.emplace_back(std::make_shared<FUI_Slider>(identifier, text, position, size, range, value_holder, FUI_Slider::type::INT));
         }
         else
             std::cout << "Duplicate IDs found (function affected: add_slider, slider_id affected: " + identifier + ")\n";
@@ -3284,16 +3853,22 @@ namespace olc
         {
             if (windows.size() > 0)
             {
+                bool did_add = false;
                 for (auto& window : windows)
                 {
                     if (window->get_id() == parent_id)
+                    {
+                        did_add = true;
                         if (!active_group.second.empty())
-                            elements.push_front(std::make_shared<FUI_Button>(identifier, window, text, position, size, callback));
+                            elements.emplace_front(std::make_shared<FUI_Button>(identifier, window, text, position, size, callback));
                         else
-                            elements.push_front(std::make_shared<FUI_Button>(identifier, window, active_group.second, text, position, size, callback));
-                    else
-                        std::cout << "Could not find parent window ID (function affected: add_button, button_id affected: " + identifier + ")\n";
+                            elements.emplace_front(std::make_shared<FUI_Button>(identifier, window, active_group.second, text, position, size, callback));
+                    
+                        break;
+                    }
                 }
+                if (!did_add)
+                    std::cout << "Could not find parent window ID (function affected: add_button, button_id affected: " + identifier + ")\n";
             }
             else
                 std::cout << "There's no windows to be used as parent (function affected: add_button, button_id affected: " + identifier + ")\n";
@@ -3312,16 +3887,16 @@ namespace olc
                 {
                     if (window->get_id() == active_window_id)
                         if (!active_group.second.empty())
-                            elements.push_front(std::make_shared<FUI_Button>(identifier, window, active_group.second, text, position, size, callback));
+                            elements.emplace_front(std::make_shared<FUI_Button>(identifier, window, active_group.second, text, position, size, callback));
                         else
-                            elements.push_front(std::make_shared<FUI_Button>(identifier, window, text, position, size, callback));
+                            elements.emplace_front(std::make_shared<FUI_Button>(identifier, window, text, position, size, callback));
                 }
             }
             else
                 if (!active_group.second.empty())
-                    elements.push_front(std::make_shared<FUI_Button>(identifier, active_group.second, text, position, size, callback));
+                    elements.emplace_front(std::make_shared<FUI_Button>(identifier, active_group.second, text, position, size, callback));
                 else
-                    elements.push_front(std::make_shared<FUI_Button>(identifier, text, position, size, callback));
+                    elements.emplace_front(std::make_shared<FUI_Button>(identifier, text, position, size, callback));
         }
         else
             std::cout << "Duplicate IDs found (function affected: add_button, button_id affected: " + identifier + ")\n";
@@ -3333,16 +3908,22 @@ namespace olc
         {
             if (windows.size() > 0)
             {
+                bool did_add = false;
                 for (auto& window : windows)
                 {
                     if (window->get_id() == parent_id)
+                    {
+                        did_add = true;
                         if (!active_group.second.empty())
-                            elements.push_back(std::make_shared<FUI_Inputfield>(identifier, window, text, position, size));
+                            elements.emplace_back(std::make_shared<FUI_Inputfield>(identifier, window, text, position, size));
                         else
-                            elements.push_back(std::make_shared<FUI_Inputfield>(identifier, window, active_group.second, text, position, size));
-                    else
-                        std::cout << "Could not find parent window ID (function affected: add_inputfield, inputfield_id affected: " + identifier + ")\n";
+                            elements.emplace_back(std::make_shared<FUI_Inputfield>(identifier, window, active_group.second, text, position, size));
+
+                        break;
+                    }
                 }
+                if (!did_add)
+                    std::cout << "Could not find parent window ID (function affected: add_inputfield, inputfield_id affected: " + identifier + ")\n";
             }
             else
                 std::cout << "There's no windows to be used as parent (function affected: add_inputfield, inputfield_id affected: " + identifier + ")\n";
@@ -3361,16 +3942,71 @@ namespace olc
                 {
                     if (window->get_id() == active_window_id)
                         if (!active_group.second.empty())
-                            elements.push_back(std::make_shared<FUI_Inputfield>(identifier, window, active_group.second, text, position, size));
+                            elements.emplace_back(std::make_shared<FUI_Inputfield>(identifier, window, active_group.second, text, position, size));
                         else
-                            elements.push_back(std::make_shared<FUI_Inputfield>(identifier, window, text, position, size));
+                            elements.emplace_back(std::make_shared<FUI_Inputfield>(identifier, window, text, position, size));
                 }
             }
             else
                 if (!active_group.second.empty())
-                    elements.push_back(std::make_shared<FUI_Inputfield>(identifier, active_group.second, text, position, size));
+                    elements.emplace_back(std::make_shared<FUI_Inputfield>(identifier, active_group.second, text, position, size));
                 else
-                    elements.push_back(std::make_shared<FUI_Inputfield>(identifier, text, position, size));
+                    elements.emplace_back(std::make_shared<FUI_Inputfield>(identifier, text, position, size));
+        }
+        else
+            std::cout << "Duplicate IDs found (function affected: add_inputfield, inputfield_id affected: " + identifier + ")\n";
+    }
+
+    void FrostUI::add_console(const std::string& parent_id, const std::string& identifier, const std::string& text, olc::vi2d position, olc::vi2d size, int inputfield_thickness)
+    {
+        if (!find_element(identifier))
+        {
+            if (windows.size() > 0)
+            {
+                bool did_add = false;
+                for (auto& window : windows)
+                {
+                    if (window->get_id() == parent_id)
+                    {
+                        did_add = true;
+                        if (!active_group.second.empty())
+                            elements.emplace_back(std::make_shared<FUI_Console>(identifier, window, text, position, size, inputfield_thickness));
+                        else
+                            elements.emplace_back(std::make_shared<FUI_Console>(identifier, window, active_group.second, text, position, size, inputfield_thickness));
+                        
+                        break;
+                    }
+                }
+                if (!did_add)
+                    std::cout << "Could not find parent window ID (function affected: add_console, console_id affected: " + identifier + ")\n";
+            }
+            else
+                std::cout << "There's no windows to be used as parent (function affected: add_console, console_id affected: " + identifier + ")\n";
+        }
+        else
+            std::cout << "Duplicate IDs found (function affected: add_console, console_id affected: " + identifier + ")\n";
+    }
+
+    void FrostUI::add_console(const std::string& identifier, const std::string& text, olc::vi2d position, olc::vi2d size, int inputfield_thickness)
+    {
+        if (!find_element(identifier))
+        {
+            if (!active_window_id.empty())
+            {
+                for (auto& window : windows)
+                {
+                    if (window->get_id() == active_window_id)
+                        if (!active_group.second.empty())
+                            elements.emplace_back(std::make_shared<FUI_Console>(identifier, window, active_group.second, text, position, size, inputfield_thickness));
+                        else
+                            elements.emplace_back(std::make_shared<FUI_Console>(identifier, window, text, position, size, inputfield_thickness));
+                }
+            }
+            else
+                if (!active_group.second.empty())
+                    elements.emplace_back(std::make_shared<FUI_Console>(identifier, active_group.second, text, position, size, inputfield_thickness));
+                else
+                    elements.emplace_back(std::make_shared<FUI_Console>(identifier, text, position, size, inputfield_thickness));
         }
         else
             std::cout << "Duplicate IDs found (function affected: add_inputfield, inputfield_id affected: " + identifier + ")\n";
@@ -3431,7 +4067,22 @@ namespace olc
             }
             if (!e->get_parent())
             {
-                if (!is_a_window_focused())
+                if (windows.size() > 0)
+                {
+                    if (!(is_a_window_focused() || is_cursor_in_window()))
+                    {
+                        if (trigger_pushback.second)
+                        {
+                            if (trigger_pushback.second->get_identifier() == e->get_identifier())
+                            {
+                                e->input(pge);
+                            }
+                        }
+                        else
+                            e->input(pge);
+                    }
+                }
+                else
                 {
                     if (trigger_pushback.second)
                     {
