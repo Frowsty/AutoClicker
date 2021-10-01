@@ -81,19 +81,25 @@ public:
 
         gui.add_label("panic_key", "Hotkey: ESC", { 140, 240 });
 
-        gui.add_int_slider("start_time", "Start Delay (s): ", { 100, 40 }, { 100, 10 }, { 1, 10 }, &start_value);
-        gui.add_int_slider("pause_time", "Timeout (ms): ", { 100, 60 }, { 100, 10 }, { 10, 1000 }, & timeout_value);
+        gui.add_int_slider("start_time", "Start Delay (s): ", { 100, 40 }, { 100, 10 }, { 1, 10 });
+        gui.add_int_slider("pause_time", "Timeout (ms): ", { 100, 60 }, { 100, 10 }, { 10, 1000 });
 
         gui.add_button("left_mb", "Left Click (activatable)", { 20, 80 }, { 180, 20 }, [] {});
         gui.add_button("right_mb", "Right Click (activatable)", { 20, 110 }, { 180, 20 }, [] {});
         gui.add_button("keep_top", "Keep Window ontop", { 20, 140 }, { 180, 20 }, [] {});
-        gui.find_element("keep_top")->make_toggleable(&keep_window_ontop);
-        gui.find_element("left_mb")->make_toggleable(&use_left_click);
-        gui.find_element("right_mb")->make_toggleable(&use_right_click);
+        gui.find_element("keep_top")->make_toggleable(false);
+        gui.find_element("left_mb")->make_toggleable(false);
+        gui.find_element("right_mb")->make_toggleable(false);
 
         gui.add_button("activate", "Start Clicker", { 220 / 2 - 45, 170 }, { 90, 20 }, [&] 
             {
                 is_active = !is_active;
+
+                start_value = gui.find_element("start_time")->get_slider_value<int>();
+                timeout_value = gui.find_element("pause_time")->get_slider_value<int>();
+
+                use_left_click = gui.find_element("left_mb")->get_button_state();
+                use_right_click = gui.find_element("right_mb")->get_button_state();
 
                 if (is_active)
                 {
@@ -152,6 +158,8 @@ public:
     bool OnUserUpdate(float fElapsedTime) override
     {
         Clear(olc::BLACK);
+
+        keep_window_ontop = gui.find_element("keep_top")->get_button_state();
 
         // panic key
         if (GetKeyState(VK_ESCAPE) < 0 && !pressed_hotkey)
